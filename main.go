@@ -172,20 +172,6 @@ func main() {
 	}
 	log.Printf("Loaded %d providers", len(server.providers))
 
-	// Start opencode server
-	if err := server.startOpencodeServer(); err != nil {
-		log.Fatalf("Failed to start opencode server: %v", err)
-	}
-	defer server.stopOpencodeServer()
-
-	// Wait for opencode to be ready
-	time.Sleep(2 * time.Second)
-
-	// Load providers
-	if err := server.loadProviders(); err != nil {
-		log.Fatalf("Failed to load providers: %v", err)
-	}
-
 	// Set up routes
 	http.HandleFunc("/", server.handleIndex)
 	http.HandleFunc("/send", server.handleSend)
