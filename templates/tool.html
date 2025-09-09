@@ -1,0 +1,92 @@
+{{define "tool"}}
+{{if eq .Name "todowrite"}}
+    <!-- Special rendering for todowrite - no collapsing -->
+    <div class="my-2 p-3 bg-blue-50 border border-blue-200 rounded-lg">
+        <div class="flex items-center gap-2 mb-2">
+            <span>✅</span>
+            <span class="font-medium text-blue-900">Todo List Updated</span>
+        </div>
+        {{if .TodoHTML}}
+            {{.TodoHTML}}
+        {{else if .Output}}
+            <pre class="overflow-x-auto text-sm">{{.Output}}</pre>
+        {{end}}
+    </div>
+{{else}}
+    <details class="my-2 border border-gray-300 rounded-lg">
+        <summary class="px-3 py-2 bg-gray-100 hover:bg-gray-200 cursor-pointer">
+            <span class="inline-flex items-center gap-2">
+                {{if eq .Name "bash"}}
+                    <span>🔨</span>
+                {{else if eq .Name "write"}}
+                    <span>📄</span>
+                {{else if eq .Name "read"}}
+                    <span>📖</span>
+                {{else if eq .Name "edit"}}
+                    <span>✏️</span>
+                {{else if eq .Name "multiedit"}}
+                    <span>✏️</span>
+                {{else if eq .Name "grep"}}
+                    <span>🔍</span>
+                {{else if eq .Name "glob"}}
+                    <span>📁</span>
+                {{else if eq .Name "task"}}
+                    <span>🤖</span>
+                {{else}}
+                    <span>🔧</span>
+                {{end}}
+                <span class="font-medium">{{.Name}}</span>
+                
+                {{if eq .Name "bash"}}
+                    {{if .Command}}
+                        <code class="ml-2 px-2 py-1 bg-gray-800 text-gray-100 text-sm rounded">{{.Command}}</code>
+                    {{end}}
+                {{else if or (eq .Name "write") (eq .Name "read") (eq .Name "edit") (eq .Name "multiedit")}}
+                    {{if .Filename}}
+                        <span class="text-gray-600">{{.Filename}}</span>
+                    {{end}}
+                {{else if eq .Name "grep"}}
+                    {{if .Pattern}}
+                        <code class="text-gray-600">{{.Pattern}}</code>
+                    {{end}}
+                {{else if eq .Name "glob"}}
+                    {{if .Pattern}}
+                        <code class="text-gray-600">{{.Pattern}}</code>
+                    {{end}}
+                {{else if eq .Name "task"}}
+                    {{if .Description}}
+                        <span class="text-gray-600">{{.Description}}</span>
+                    {{end}}
+                {{end}}
+            </span>
+            <span class="ml-auto text-xs text-gray-500">{{.Status}}</span>
+        </summary>
+        
+        <div class="p-3 border-t border-gray-200">
+            {{if .ShowInput}}
+            <div class="mb-2">
+                <span class="font-medium text-sm">Input:</span>
+                <pre class="bg-gray-900 text-gray-100 p-2 rounded overflow-x-auto text-sm mt-1">{{.InputJSON}}</pre>
+            </div>
+            {{end}}
+            
+            {{if or .Output .Content}}
+            <div>
+                {{if eq .Name "write"}}
+                    {{if .Content}}
+                        <span class="font-medium text-sm">Content:</span>
+                        <pre class="bg-gray-900 text-gray-100 p-3 rounded overflow-x-auto text-sm mt-1">{{.Content}}</pre>
+                    {{else if .Output}}
+                        <span class="font-medium text-sm">Output:</span>
+                        <pre class="bg-gray-900 text-gray-100 p-3 rounded overflow-x-auto text-sm mt-1">{{.Output}}</pre>
+                    {{end}}
+                {{else}}
+                    <span class="font-medium text-sm">Output:</span>
+                    <pre class="bg-gray-900 text-gray-100 p-3 rounded overflow-x-auto text-sm mt-1">{{.Output}}</pre>
+                {{end}}
+            </div>
+            {{end}}
+        </div>
+    </details>
+{{end}}
+{{end}}

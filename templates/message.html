@@ -1,5 +1,5 @@
 {{define "message"}}
-<div class="my-2 flex {{if eq .Alignment "left"}}justify-start{{else}}justify-end{{end}}{{if .IsStreaming}} streaming{{end}}"{{if .ID}} id="{{.ID}}"{{end}}{{if .HXSwapOOB}} hx-swap-oob="outerHTML:#{{.ID}}"{{end}}>
+<div class="my-2 flex {{if eq .Alignment "left"}}justify-start{{else}}justify-end{{end}}{{if .IsStreaming}} streaming{{end}}"{{if .ID}} id="{{.ID}}"{{end}}{{if .HXSwapOOB}} hx-swap-oob="true"{{end}}>
     <div class="max-w-[70%] p-3 rounded-lg break-words {{if eq .Alignment "left"}}bg-gray-200 rounded-bl-none{{else}}bg-gray-300 rounded-br-none{{end}}">
         {{if .Parts}}
             {{range .Parts}}
@@ -12,9 +12,12 @@
                         <pre class="overflow-x-auto">{{.Content}}</pre>
                     </div>
                 {{else if eq .Type "tool"}}
-                    <div class="my-2 first:mt-0 last:mb-0">
-                        <pre class="overflow-x-auto">{{.Content}}</pre>
-                    </div>
+                    {{if .RenderedHTML}}
+                        {{.RenderedHTML}}
+                    {{else}}
+                        <!-- Fallback for tools without custom rendering -->
+                        <pre class="overflow-x-auto bg-gray-900 text-gray-100 p-3 rounded my-2">{{.Content}}</pre>
+                    {{end}}
                 {{else if eq .Type "file"}}
                     <div class="my-2 first:mt-0 last:mb-0">{{.Content}}</div>
                 {{else if eq .Type "snapshot"}}
@@ -24,9 +27,17 @@
                 {{else if eq .Type "agent"}}
                     <div class="my-2 first:mt-0 last:mb-0">{{.Content}}</div>
                 {{else if eq .Type "step-start"}}
-                    <div class="my-2 first:mt-0 last:mb-0">{{.Content}}</div>
+                    {{if .RenderedHTML}}
+                        {{.RenderedHTML}}
+                    {{else}}
+                        <div class="my-2 first:mt-0 last:mb-0">{{.Content}}</div>
+                    {{end}}
                 {{else if eq .Type "step-finish"}}
-                    <div class="my-2 first:mt-0 last:mb-0">{{.Content}}</div>
+                    {{if .RenderedHTML}}
+                        {{.RenderedHTML}}
+                    {{else}}
+                        <div class="my-2 first:mt-0 last:mb-0">{{.Content}}</div>
+                    {{end}}
                 {{end}}
             {{end}}
         {{else}}

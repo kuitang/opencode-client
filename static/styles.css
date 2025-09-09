@@ -19,9 +19,14 @@
     }
 }
 
-/* Preserve line breaks in prose content */
-.prose {
+/* Only preserve line breaks for plain text without markdown */
+.preserve-breaks {
     white-space: pre-line; /* Preserves line breaks, collapses spaces */
+}
+
+/* Normal spacing for markdown-rendered content */
+.prose {
+    white-space: normal; /* Let markdown handle its own spacing */
 }
 
 /* Fix list styling in message bubbles */

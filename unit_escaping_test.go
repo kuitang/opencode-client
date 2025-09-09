@@ -6,50 +6,6 @@ import (
 	"testing"
 )
 
-func TestHasMarkdownPatterns(t *testing.T) {
-	tests := []struct {
-		name     string
-		input    string
-		expected bool
-	}{
-		// Markdown patterns that should be detected
-		{"Bold text", "This is **bold** text", true},
-		{"Italic text", "This is *italic* text", true},
-		{"Header", "# Header", true},
-		{"Header with space", "## Sub Header", true},
-		{"Numbered list", "1. First item", true},
-		{"Bullet list", "- Bullet point", true},
-		{"Code inline", "Use `code` here", true},
-		{"Link", "[link](http://example.com)", true},
-		
-		// Edge cases that should be detected as markdown
-		{"Multiple patterns", "# Header\n**bold** and *italic*", true},
-		{"Code with backticks", "Run `rm -rf /` carefully", true},
-		
-		// Plain text that should NOT be detected as markdown
-		{"Plain text", "Just plain text", false},
-		{"Email asterisk", "Terms apply*", false},
-		{"Math multiplication", "2 * 3 = 6", false},
-		{"Filename", "config_2024-01-01.txt", false},
-		{"URL without markdown", "http://example.com", false},
-		{"HTML tags", "<script>alert('xss')</script>", false},
-		{"Numbered text", "Call 1. 800. EXAMPLE", false},
-		{"Dash in sentence", "Well-formatted text", false},
-		
-		// Malicious content that should NOT be detected as markdown
-		{"Script tag", "<script>alert('XSS')</script>", false},
-		{"Onclick handler", "<div onclick='alert(1)'>Click</div>", false},
-		{"Image onerror", "<img src=x onerror=alert(1)>", false},
-		{"Mixed HTML and potential markdown", "<div>*not italic*</div>", false},
-	}
-	
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			// Skip this test - hasMarkdownPatterns removed in unified renderer
-			_ = tt
-		})
-	}
-}
 
 func TestHTMLEscapingInTemplates(t *testing.T) {
 	// Test that Go templates auto-escape HTML in {{.Content}}
@@ -131,9 +87,9 @@ func TestHTMLEscapingInTemplates(t *testing.T) {
 }
 
 func TestNewlinePreservation(t *testing.T) {
-	// Test that whitespace-pre-wrap CSS preserves newlines
+	// Test that preserve-breaks CSS preserves newlines
 	tmpl := template.Must(template.New("test").Parse(
-		`<div class="whitespace-pre-wrap">{{.}}</div>`))
+		`<div class="preserve-breaks">{{.}}</div>`))
 	
 	tests := []struct {
 		name     string
@@ -210,88 +166,6 @@ func TestNewlinePreservation(t *testing.T) {
 	}
 }
 
-func TestRenderMarkdown(t *testing.T) {
-	tests := []struct {
-		name     string
-		input    string
-		contains []string // HTML elements that should be in output
-		excludes []string // HTML elements that should NOT be in output
-	}{
-		{
-			name:     "Bold text",
-			input:    "This is **bold** text",
-			contains: []string{"<strong>bold</strong>"},
-			excludes: []string{"**bold**"},
-		},
-		{
-			name:     "Italic text",
-			input:    "This is *italic* text",
-			contains: []string{"<em>italic</em>"},
-			excludes: []string{"*italic*"},
-		},
-		{
-			name:     "Header",
-			input:    "# Main Header",
-			contains: []string{"<h1>Main Header</h1>"},
-			excludes: []string{"# Main Header"},
-		},
-		{
-			name:     "Code inline",
-			input:    "Use `code` here",
-			contains: []string{"<code>code</code>"},
-			excludes: []string{"`code`"},
-		},
-		{
-			name:     "Link",
-			input:    "[Google](https://google.com)",
-			contains: []string{
-				`<a href="https://google.com"`,
-				`Google</a>`,
-				`rel="nofollow"`, // Bluemonday adds this for security
-			},
-			excludes: []string{"[Google]"},
-		},
-		{
-			name:  "XSS in markdown",
-			input: "**bold** <script>alert('XSS')</script>",
-			contains: []string{
-				"<strong>bold</strong>",
-				// Bluemonday sanitizes HTML - script tags are removed!
-			},
-			excludes: []string{
-				"<script>", // Script tags should be removed by bluemonday
-				"alert", // Script content should be removed
-			},
-		},
-		{
-			name:     "Plain text fallback",
-			input:    "No markdown here",
-			contains: []string{"No markdown here"},
-			excludes: []string{"<strong>", "<em>"},
-			// Note: <p> tags are now expected with unified renderer
-		},
-	}
-	
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			result := string(renderText(tt.input))
-			
-			for _, expected := range tt.contains {
-				if !strings.Contains(result, expected) {
-					t.Errorf("renderText(%q) missing expected content: %q\nGot: %q", 
-						tt.input, expected, result)
-				}
-			}
-			
-			for _, unexpected := range tt.excludes {
-				if strings.Contains(result, unexpected) {
-					t.Errorf("renderText(%q) contains unexpected content: %q\nGot: %q", 
-						tt.input, unexpected, result)
-				}
-			}
-		})
-	}
-}
 
 func TestMessagePartDataSecurity(t *testing.T) {
 	// Test that MessagePartData correctly handles malicious content

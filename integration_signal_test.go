@@ -2,7 +2,6 @@ package main
 
 import (
 	"fmt"
-	"net/http"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -31,20 +30,10 @@ func TestSignalHandling(t *testing.T) {
 	}
 	
 	// Wait for the server to be ready
-	start := time.Now()
-	var resp *http.Response
-	for time.Since(start) < 10*time.Second {
-		var err error
-		resp, err = http.Get(fmt.Sprintf("http://localhost:%d/", port))
-		if err == nil {
-			break
-		}
-		time.Sleep(200 * time.Millisecond)
+	if err := WaitForHTTPServerReady(port, 10*time.Second); err != nil {
+		cmd.Process.Kill()
+		t.Fatalf("Server not ready: %v", err)
 	}
-	if resp == nil {
-		t.Fatalf("Server not responding after 10 seconds")
-	}
-	resp.Body.Close()
 	
 	// Get the process ID
 	pid := cmd.Process.Pid
@@ -82,10 +71,8 @@ func TestSignalHandling(t *testing.T) {
 	}
 	
 	// Verify the server is no longer responding
-	time.Sleep(500 * time.Millisecond)
-	_, err := http.Get(fmt.Sprintf("http://localhost:%d/", port))
-	if err == nil {
-		t.Error("Server is still responding after shutdown")
+	if err := WaitForServerShutdown(port, 5*time.Second); err != nil {
+		t.Errorf("Server still responding after shutdown: %v", err)
 	}
 }
 
@@ -109,14 +96,9 @@ func TestOpencodeCleanupOnSignal(t *testing.T) {
 	}
 	
 	// Wait for the server to be ready
-	start := time.Now()
-	for time.Since(start) < 10*time.Second {
-		resp, err := http.Get(fmt.Sprintf("http://localhost:%d/", port))
-		if err == nil {
-			resp.Body.Close()
-			break
-		}
-		time.Sleep(200 * time.Millisecond)
+	if err := WaitForHTTPServerReady(port, 10*time.Second); err != nil {
+		cmd.Process.Kill()
+		t.Fatalf("Server not ready: %v", err)
 	}
 	
 	// Find temp directory by looking for one with our PID
@@ -160,12 +142,19 @@ func TestOpencodeCleanupOnSignal(t *testing.T) {
 		t.Fatal("Process did not terminate within 10 seconds")
 	}
 	
-	// Give a moment for cleanup
-	time.Sleep(1 * time.Second)
+	// Wait for opencode processes to be cleaned up
+	expectedCount := opencodeCountBefore - 1
+	if expectedCount < 0 {
+		expectedCount = 0
+	}
+	
+	if err := WaitForProcessCount(expectedCount, 5*time.Second); err != nil {
+		t.Logf("Warning: %v", err)
+	}
 	
 	// Check for opencode processes after signal
 	opencodeCountAfter := countOpencodeProcesses()
-	t.Logf("Opencode processes after signal: %d", opencodeCountAfter)
+	t.Logf("Opencode processes after signal: %d (was %d)", opencodeCountAfter, opencodeCountBefore)
 	
 	if opencodeCountAfter >= opencodeCountBefore && opencodeCountBefore > 0 {
 		t.Error("Opencode process was not terminated")
@@ -205,15 +194,3 @@ func findStringInOutput(output, search string) int {
 	return -1
 }
 
-// Helper function to count opencode processes
-func countOpencodeProcesses() int {
-	cmd := exec.Command("sh", "-c", "ps aux | grep 'opencode serve' | grep -v grep | wc -l")
-	output, err := cmd.Output()
-	if err != nil {
-		return 0
-	}
-	
-	count := 0
-	fmt.Sscanf(string(output), "%d", &count)
-	return count
-}

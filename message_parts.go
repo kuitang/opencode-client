@@ -2,7 +2,6 @@ package main
 
 import (
 	"fmt"
-	"log"
 )
 
 // MessagePartsManager manages message parts for SSE streaming,
@@ -102,14 +101,12 @@ func ValidateAndExtractMessagePart(event map[string]interface{}, sessionID strin
 	// Extract and validate message ID
 	messageID, ok = part["messageID"].(string)
 	if !ok || messageID == "" {
-		log.Printf("WARNING: SSE event missing valid messageID: %v", part)
 		return "", "", nil, fmt.Errorf("invalid or missing messageID")
 	}
 
 	// Extract and validate part ID
 	partID, ok = part["id"].(string)
 	if !ok || partID == "" {
-		log.Printf("WARNING: SSE event missing valid partID for message %s: %v", messageID, part)
 		return "", "", nil, fmt.Errorf("invalid or missing partID")
 	}
 

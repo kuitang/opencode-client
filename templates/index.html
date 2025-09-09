@@ -27,7 +27,7 @@
     </div>
     
     <div class="bg-white border-t border-gray-200 p-4">
-        <form id="message-form" hx-post="/send" hx-target="#messages" hx-swap="beforeend" hx-on::after-request="this.reset(); document.getElementById('message-input').style.height = 'auto';">
+        <form id="message-form" hx-target="#messages" hx-swap="beforeend" hx-on::after-request="this.reset(); document.getElementById('message-input').style.height = 'auto';">
             <div class="flex gap-2 items-end">
                 <textarea id="message-input" 
                           name="message" 
@@ -35,8 +35,17 @@
                           required 
                           autocomplete="off"
                           rows="1"
+                          hx-post="/send"
+                          hx-trigger="keydown[key==='Enter'&&!shiftKey]"
+                          hx-target="#messages"
+                          hx-swap="beforeend"
+                          hx-include="closest form"
                           class="flex-1 px-3 py-2 border border-gray-300 rounded focus:outline-none focus:ring-2 focus:ring-gray-400 resize-none overflow-hidden"></textarea>
                 <button type="submit" 
+                        hx-post="/send"
+                        hx-target="#messages"
+                        hx-swap="beforeend"
+                        hx-include="closest form"
                         class="px-4 py-2 bg-gray-600 hover:bg-gray-700 text-white rounded transition-colors">Send</button>
             </div>
             <div class="flex flex-wrap gap-3 items-center mt-3 text-sm">

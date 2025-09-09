@@ -14,40 +14,7 @@ document.addEventListener('DOMContentLoaded', function() {
             this.style.height = Math.min(this.scrollHeight, 200) + 'px';
         });
         
-        // Handle Enter vs Shift+Enter
-        messageInput.addEventListener('keydown', function(e) {
-            if (e.key === 'Enter' && !e.shiftKey) {
-                e.preventDefault();
-                if (this.value.trim()) {
-                    messageForm.requestSubmit();
-                }
-            }
-            // Shift+Enter will naturally add a newline
-        });
+        // Enter key handling now done via HTMX hx-trigger
+        // Shift+Enter naturally adds newlines
     }
-});
-
-// Handle SSE messages with OOB support
-document.body.addEventListener('htmx:sseMessage', function(evt) {
-    // Parse the incoming HTML to check for OOB elements
-    const parser = new DOMParser();
-    const doc = parser.parseFromString(evt.detail.data, 'text/html');
-    const element = doc.body.firstElementChild;
-    
-    if (element && element.hasAttribute('hx-swap-oob')) {
-        // This is an OOB update
-        evt.preventDefault(); // Prevent default SSE handling
-        
-        const targetId = element.id;
-        if (targetId) {
-            const target = document.getElementById(targetId);
-            if (target) {
-                // Replace the existing element
-                target.outerHTML = evt.detail.data;
-                // Process htmx attributes on the new element
-                htmx.process(document.getElementById(targetId));
-            }
-        }
-    }
-    // If not OOB, let htmx handle it normally
 });

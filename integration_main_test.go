@@ -283,7 +283,7 @@ func TestGetMessages(t *testing.T) {
 
 	// Create session and send messages
 	cookie := &http.Cookie{Name: "session", Value: "test-messages"}
-	_, err = server.getOrCreateSession(cookie.Value)
+	sessionID, err := server.getOrCreateSession(cookie.Value)
 	if err != nil {
 		t.Fatalf("Failed to create session: %v", err)
 	}
@@ -301,8 +301,10 @@ func TestGetMessages(t *testing.T) {
 	w := httptest.NewRecorder()
 	server.handleSend(w, req)
 
-	// Brief wait for message to be processed (this test is about UI rendering)
-	time.Sleep(100 * time.Millisecond)
+	// Wait for message to be processed  
+	if err := WaitForMessageProcessed(server.opencodePort, sessionID, 5*time.Second); err != nil {
+		t.Logf("Warning: Message may not be processed yet: %v", err)
+	}
 
 	// Now get messages
 	req = httptest.NewRequest("GET", "/messages", nil)
@@ -441,10 +443,17 @@ func TestSSEEndpoint(t *testing.T) {
 	// Here we just check that the endpoint responds correctly
 	go server.handleSSE(w, req)
 
-	// Give it a moment to set headers
-	time.Sleep(100 * time.Millisecond)
-
-	resp := w.Result()
+	// SSE headers are set when handler starts writing
+	// For httptest.ResponseRecorder, we need to wait for the goroutine to start
+	var resp *http.Response
+	start := time.Now()
+	for time.Since(start) < 2*time.Second {
+		resp = w.Result()
+		if resp.Header.Get("Content-Type") != "" {
+			break
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
 	contentType := resp.Header.Get("Content-Type")
 	if contentType != "text/event-stream" {
 		t.Errorf("Expected Content-Type text/event-stream, got %s", contentType)

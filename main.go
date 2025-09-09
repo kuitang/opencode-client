@@ -19,9 +19,6 @@ import (
 	"sync"
 	"syscall"
 	"time"
-
-	"github.com/microcosm-cc/bluemonday"
-	"github.com/russross/blackfriday/v2"
 )
 
 //go:embed templates/*.html
@@ -108,46 +105,16 @@ func (lw *LoggingResponseWriter) LogResponse(method, path string) {
 	log.Printf("WIRE_OUT %s %s [%d]: %s", method, path, lw.statusCode, bodyStr)
 }
 
-type MessagePartData struct {
-	Type        string
-	Content     string
-	RenderedHTML template.HTML  // Used for text parts only
-	PartID      string // To identify updates to same part
-}
-
-// renderText converts text to HTML with markdown support and autolink, then sanitizes it
-// Used for all text content (user input and LLM output) except tool/reasoning blocks
-func renderText(text string) template.HTML {
-	// Render with markdown and autolink extensions
-	// This works for both markdown AND plain text
-	html := blackfriday.Run([]byte(text), 
-		blackfriday.WithExtensions(
-			blackfriday.CommonExtensions | blackfriday.Autolink))
-	
-	// Sanitize HTML to prevent XSS
-	// UGCPolicy is designed for user-generated content
-	// It allows formatting tags but removes dangerous elements like <script>
-	policy := bluemonday.UGCPolicy()
-	safeHTML := policy.SanitizeBytes(html)
-	
-	return template.HTML(safeHTML)
-}
 
 
-type MessageData struct {
-	ID          string
-	Alignment   string
-	Text        string
-	Parts       []MessagePartData
-	Provider    string
-	Model       string
-	IsStreaming bool
-	HXSwapOOB   bool
-}
+
+
+
+
 
 // NewServer creates a new Server instance with properly initialized templates
 func NewServer(opencodePort int) (*Server, error) {
-	tmpl, err := template.ParseFS(templateFS, "templates/*.html")
+	tmpl, err := loadTemplates()
 	if err != nil {
 		return nil, fmt.Errorf("failed to parse templates: %w", err)
 	}
@@ -170,9 +137,12 @@ func main() {
 		sessions:     make(map[string]string),
 	}
 
-	// Load templates
+	// Load templates with custom functions
 	var err error
-	server.templates, err = template.ParseFS(templateFS, "templates/*.html")
+	funcMap := template.FuncMap{
+		"add": func(a, b int) int { return a + b },
+	}
+	server.templates, err = template.New("").Funcs(funcMap).ParseFS(templateFS, "templates/*.html")
 	if err != nil {
 		log.Fatalf("Failed to parse templates: %v", err)
 	}
@@ -495,14 +465,6 @@ func (s *Server) getOrCreateSession(cookie string) (string, error) {
 	return session.ID, nil
 }
 
-// renderMessage renders a message using the template
-func (s *Server) renderMessage(msg MessageData) (string, error) {
-	var buf bytes.Buffer
-	if err := s.templates.ExecuteTemplate(&buf, "message", msg); err != nil {
-		return "", err
-	}
-	return buf.String(), nil
-}
 
 func (s *Server) handleIndex(w http.ResponseWriter, r *http.Request) {
 	cookie, err := r.Cookie("session")
@@ -794,29 +756,29 @@ func (s *Server) handleSSE(w http.ResponseWriter, r *http.Request) {
 					toolName, _ := part["tool"].(string)
 					if state, ok := part["state"].(map[string]interface{}); ok {
 						status, _ := state["status"].(string)
+						input, _ := state["input"].(map[string]interface{})
+						output, _ := state["output"].(string)
 						
-						// Start with tool header
+						// Use the new renderToolDetails function
+						renderedHTML := renderToolDetails(s.templates, toolName, status, input, output)
+						
+						// Create a simple text fallback for non-HTML contexts
 						var toolContent strings.Builder
 						toolContent.WriteString(fmt.Sprintf("Tool: %s (Status: %s)", toolName, status))
-						
-						// Add tool input if available
-						if input, ok := state["input"].(map[string]interface{}); ok {
+						if len(input) > 0 {
 							toolContent.WriteString("\nInput: ")
 							for key, value := range input {
 								toolContent.WriteString(fmt.Sprintf("%s=%v ", key, value))
 							}
 						}
-						
-						// Add tool output if available
-						if output, ok := state["output"].(string); ok && output != "" {
+						if output != "" {
 							toolContent.WriteString("\nOutput:\n" + output)
 						}
 						
-						toolText := toolContent.String()
 						newPart = MessagePartData{
-							Type:    "tool",
-							Content: toolText,
-							// No RenderedHTML - will use .Content in <pre> tag
+							Type:         "tool",
+							Content:      toolContent.String(),
+							RenderedHTML: renderedHTML,
 						}
 					}
 				case "file":
@@ -842,15 +804,26 @@ func (s *Server) handleSSE(w http.ResponseWriter, r *http.Request) {
 						Content: "🤖 Agent action",
 					}
 				case "step-start":
+					// Render as status badge (block-level for new line)
+					badgeHTML := template.HTML(`<div class="flex items-center gap-2 px-3 py-1 bg-yellow-100 text-yellow-800 rounded-full text-sm my-2 w-fit">
+						<span>▶️</span>
+						<span>Step started</span>
+					</div>`)
 					newPart = MessagePartData{
-						Type:    "step-start",
-						Content: "▶️ Step started",
+						Type:         "step-start",
+						Content:      "▶️ Step started",
+						RenderedHTML: badgeHTML,
 					}
 				case "step-finish":
-					// Mark message as complete
+					// Mark message as complete - render as status badge (block-level for new line)
+					badgeHTML := template.HTML(`<div class="flex items-center gap-2 px-3 py-1 bg-green-100 text-green-800 rounded-full text-sm my-2 w-fit">
+						<span>✅</span>
+						<span>Step completed</span>
+					</div>`)
 					newPart = MessagePartData{
-						Type:    "step-finish",
-						Content: "✅ Step completed",
+						Type:         "step-finish",
+						Content:      "✅ Step completed",
+						RenderedHTML: badgeHTML,
 					}
 				}
 
@@ -885,7 +858,7 @@ func (s *Server) handleSSE(w http.ResponseWriter, r *http.Request) {
 					HXSwapOOB:   messageFirstSent[msgID], // Use OOB for updates after first send
 				}
 
-				html, err := s.renderMessage(msgData)
+				html, err := renderMessage(s.templates, msgData)
 				if err == nil {
 					html = strings.TrimSpace(html)
 					
@@ -991,7 +964,7 @@ func (s *Server) getMessagesHTML(sessionID string) string {
 			Model:     msg.Info.ModelID,
 		}
 
-		if msgHTML, err := s.renderMessage(msgData); err == nil {
+		if msgHTML, err := renderMessage(s.templates, msgData); err == nil {
 			html.WriteString(msgHTML)
 		}
 	}

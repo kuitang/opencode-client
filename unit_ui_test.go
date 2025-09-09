@@ -1,7 +1,6 @@
 package main
 
 import (
-	"bytes"
 	"strings"
 	"testing"
 
@@ -10,7 +9,7 @@ import (
 
 // Test that message templates render with correct IDs
 func TestMessageTemplateIDs(t *testing.T) {
-	server, err := NewServer(GetTestPort())
+	templates, err := loadTemplates()
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -61,13 +60,12 @@ func TestMessageTemplateIDs(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			var buf bytes.Buffer
-			err := server.templates.ExecuteTemplate(&buf, "message", tt.data)
+			html, err := renderMessage(templates, tt.data)
 			if err != nil {
 				t.Fatal(err)
 			}
 
-			doc, err := goquery.NewDocumentFromReader(&buf)
+			doc, err := goquery.NewDocumentFromReader(strings.NewReader(html))
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -91,8 +89,8 @@ func TestMessageTemplateIDs(t *testing.T) {
 			if tt.wantOOB && !hasOOB {
 				t.Errorf("Expected hx-swap-oob attribute")
 			}
-			if tt.wantOOB && !strings.Contains(oob, tt.wantID) {
-				t.Errorf("Expected hx-swap-oob to reference ID %q", tt.wantID)
+			if tt.wantOOB && oob != "true" {
+				t.Errorf("Expected hx-swap-oob=\"true\", got %q", oob)
 			}
 
 			// Check class - using actual template classes
@@ -118,7 +116,7 @@ func TestMessageTemplateIDs(t *testing.T) {
 
 // Test that message metadata renders correctly
 func TestMessageMetadata(t *testing.T) {
-	server, err := NewServer(GetTestPort())
+	templates, err := loadTemplates()
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -161,13 +159,12 @@ func TestMessageMetadata(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			var buf bytes.Buffer
-			err := server.templates.ExecuteTemplate(&buf, "message", tt.data)
+			html, err := renderMessage(templates, tt.data)
 			if err != nil {
 				t.Fatal(err)
 			}
 
-			doc, err := goquery.NewDocumentFromReader(&buf)
+			doc, err := goquery.NewDocumentFromReader(strings.NewReader(html))
 			if err != nil {
 				t.Fatal(err)
 			}

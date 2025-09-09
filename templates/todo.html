@@ -1,0 +1,20 @@
+{{define "todo"}}
+<div class="todo-list text-sm">
+    {{range $index, $todo := .}}
+    <div class="flex items-start gap-2 py-1">
+        <span class="inline-block w-6 text-center {{if eq $todo.Status "completed"}}text-green-600{{else if eq $todo.Status "in_progress"}}text-blue-600{{else}}text-gray-500{{end}}">
+            {{if eq $todo.Status "completed"}}✓{{else if eq $todo.Status "in_progress"}}⏳{{else}}☐{{end}}
+        </span>
+        <span class="text-gray-400 text-xs w-6 text-right">{{add $index 1}}.</span>
+        <span class="{{if eq $todo.Status "completed"}}line-through text-gray-500{{else if eq $todo.Status "in_progress"}}text-blue-800{{else}}text-gray-800{{end}} flex-1">
+            {{$todo.Content}}
+        </span>
+        {{if $todo.Priority}}
+        <span class="text-xs {{if eq $todo.Priority "high"}}text-red-600{{else if eq $todo.Priority "medium"}}text-yellow-600{{else}}text-gray-400{{end}} ml-2">
+            {{$todo.Priority}}
+        </span>
+        {{end}}
+    </div>
+    {{end}}
+</div>
+{{end}}

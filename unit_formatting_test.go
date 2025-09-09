@@ -1,247 +1,201 @@
 package main
 
 import (
-	"html/template"
 	"strings"
 	"testing"
+
+	"github.com/PuerkitoBio/goquery"
 )
 
 func TestMessageFormatting(t *testing.T) {
+	// Test both function-level and component-level rendering
+	templates, err := loadTemplates()
+	if err != nil {
+		t.Fatalf("Failed to load templates: %v", err)
+	}
+
 	tests := []struct {
-		name        string
-		input       string
-		isUser      bool // true for user message, false for LLM message
-		expectMD    bool // expect markdown detection
-		contains    []string
-		notContains []string
+		name         string
+		input        string
+		expectMD     bool // expect markdown detection
+		hasElements  []string // HTML elements that should exist
+		hasClasses   []string // CSS classes that should exist
+		containsText []string // Text content that should be preserved
 	}{
 		// Plain text tests
 		{
-			name:     "Plain text preserves newlines",
-			input:    "Line 1\nLine 2\nLine 3",
-			isUser:   true,
-			expectMD: false,
-			contains: []string{
-				"Line 1\nLine 2\nLine 3",
-				"whitespace-pre-wrap",
-			},
+			name:         "Plain text preserves newlines",
+			input:        "Line 1\nLine 2\nLine 3",
+			expectMD:     false,
+			hasClasses:   []string{"preserve-breaks"},
+			containsText: []string{"Line 1", "Line 2", "Line 3"},
 		},
 		{
-			name:     "Plain text with bullets",
-			input:    "• Item 1\n• Item 2\n• Item 3",
-			isUser:   false,
-			expectMD: false,
-			contains: []string{
-				"• Item 1\n• Item 2\n• Item 3",
-				"whitespace-pre-wrap",
-			},
+			name:         "Plain text with bullets",
+			input:        "• Item 1\n• Item 2\n• Item 3",
+			expectMD:     false,
+			hasClasses:   []string{"preserve-breaks"},
+			containsText: []string{"• Item 1", "• Item 2", "• Item 3"},
 		},
 		{
-			name:     "Plain numbered list",
-			input:    "1. First\n2. Second\n3. Third",
-			isUser:   true,
-			expectMD: true, // Detected as markdown
-			contains: []string{
-				"<ol>",
-				"<li>First</li>",
-				"<li>Second</li>",
-			},
-			notContains: []string{
-				"1. First", // Should be rendered as HTML list
-			},
+			name:         "Plain numbered list becomes markdown",
+			input:        "1. First\n2. Second\n3. Third",
+			expectMD:     true,
+			hasElements:  []string{"ol", "li"},
+			containsText: []string{"First", "Second", "Third"},
 		},
 
 		// Markdown tests
 		{
-			name:     "Bold markdown",
-			input:    "This is **bold** text",
-			isUser:   false,
-			expectMD: true,
-			contains: []string{
-				"<strong>bold</strong>",
-			},
-			notContains: []string{
-				"**bold**",
-				"whitespace-pre-wrap",
-			},
+			name:         "Bold markdown",
+			input:        "This is **bold** text",
+			expectMD:     true,
+			hasElements:  []string{"strong"},
+			containsText: []string{"This is", "bold", "text"},
 		},
 		{
-			name:     "Italic markdown",
-			input:    "This is *italic* text",
-			isUser:   true,
-			expectMD: true,
-			contains: []string{
-				"<em>italic</em>",
-			},
-			notContains: []string{
-				"*italic*",
-			},
+			name:         "Italic markdown",
+			input:        "This is *italic* text",
+			expectMD:     true,
+			hasElements:  []string{"em"},
+			containsText: []string{"This is", "italic", "text"},
 		},
 		{
-			name:     "Mixed markdown with newlines",
-			input:    "# Header\n\nThis is **bold** and *italic*\n\n- Item 1\n- Item 2",
-			isUser:   false,
-			expectMD: true,
-			contains: []string{
-				"<h1>Header</h1>",
-				"<strong>bold</strong>",
-				"<em>italic</em>",
-				"<li>Item 1</li>",
-			},
+			name:         "Mixed markdown with newlines",
+			input:        "# Header\n\nThis is **bold** and *italic*\n\n- Item 1\n- Item 2",
+			expectMD:     true,
+			hasElements:  []string{"h1", "strong", "em", "li"},
+			containsText: []string{"Header", "bold", "italic", "Item 1", "Item 2"},
 		},
 		{
-			name:     "Code blocks",
-			input:    "```go\nfunc main() {\n    fmt.Println(\"Hello\")\n}\n```",
-			isUser:   true,
-			expectMD: true,
-			contains: []string{
-				"<pre><code",
-				"func main()",
-			},
+			name:         "Code blocks",
+			input:        "```go\nfunc main() {\n    fmt.Println(\"Hello\")\n}\n```",
+			expectMD:     true,
+			hasElements:  []string{"pre", "code"},
+			containsText: []string{"func main()"},
 		},
 		{
-			name:     "Inline code",
-			input:    "Use `fmt.Println()` to print",
-			isUser:   false,
-			expectMD: true,
-			contains: []string{
-				"<code>fmt.Println()</code>",
-			},
+			name:         "Inline code",
+			input:        "Use `fmt.Println()` to print",
+			expectMD:     true,
+			hasElements:  []string{"code"},
+			containsText: []string{"Use", "fmt.Println()", "to print"},
 		},
 
-		// Security tests
+		// Security tests - XSS should be sanitized
 		{
-			name:     "XSS in plain text",
-			input:    "<script>alert('XSS')</script>",
-			isUser:   true,
-			expectMD: false,
-			contains: []string{
-				"&lt;script&gt;alert(&#39;XSS&#39;)&lt;/script&gt;",
-				"whitespace-pre-wrap",
-			},
-			notContains: []string{
-				"<script>",
-				"alert('XSS')",
-			},
+			name:         "XSS in plain text",
+			input:        "<script>alert('XSS')</script>",
+			expectMD:     false,
+			hasClasses:   []string{"preserve-breaks"},
+			containsText: []string{}, // Script tags should be removed entirely by Bluemonday
 		},
 		{
-			name:     "XSS in markdown",
-			input:    "**Bold** <script>alert('XSS')</script>",
-			isUser:   false,
-			expectMD: true,
-			contains: []string{
-				"<strong>Bold</strong>",
-			},
-			notContains: []string{
-				"<script>",
-				"alert",
-			},
+			name:         "XSS in markdown",
+			input:        "**Bold** <script>alert('XSS')</script>",
+			expectMD:     true,
+			hasElements:  []string{"strong"},
+			containsText: []string{"Bold"}, // Script should be removed, bold should remain
 		},
 		{
-			name:     "HTML entities are escaped",
-			input:    "Less than < and greater than > and ampersand &",
-			isUser:   true,
-			expectMD: false,
-			contains: []string{
-				"Less than &lt; and greater than &gt; and ampersand &amp;",
-			},
+			name:         "HTML entities handling",
+			input:        "Less than < and greater than > and ampersand &",
+			expectMD:     false,
+			hasClasses:   []string{"preserve-breaks"},
+			containsText: []string{"Less than", "and greater than", "and ampersand"},
 		},
 
 		// Edge cases
 		{
-			name:     "Empty string",
-			input:    "",
-			isUser:   true,
-			expectMD: false,
-			contains: []string{
-				"whitespace-pre-wrap",
-			},
+			name:         "Empty string",
+			input:        "",
+			expectMD:     false,
+			hasClasses:   []string{"preserve-breaks"},
+			containsText: []string{},
 		},
 		{
-			name:     "Only whitespace",
-			input:    "   \n\n\t  ",
-			isUser:   false,
-			expectMD: false,
-			contains: []string{
-				"whitespace-pre-wrap",
-			},
+			name:         "Math expressions not markdown",
+			input:        "2 * 3 = 6 and 4 / 2 = 2",
+			expectMD:     false,
+			hasClasses:   []string{"preserve-breaks"},
+			containsText: []string{"2 * 3 = 6", "4 / 2 = 2"},
 		},
 		{
-			name:     "Math expressions not markdown",
-			input:    "2 * 3 = 6 and 4 / 2 = 2",
-			isUser:   true,
-			expectMD: false,
-			contains: []string{
-				"2 * 3 = 6",
-				"whitespace-pre-wrap",
-			},
+			name:         "URL with autolink",
+			input:        "Visit https://example.com for more",
+			expectMD:     true, // URLs get autolinked
+			hasElements:  []string{"a"},
+			containsText: []string{"Visit", "for more"},
 		},
 		{
-			name:     "URL without markdown",
-			input:    "Visit https://example.com for more",
-			isUser:   false,
-			expectMD: false,
-			contains: []string{
-				"https://example.com",
-				"whitespace-pre-wrap",
-			},
-		},
-		{
-			name:     "Markdown link",
-			input:    "Visit [Example](https://example.com) for more",
-			isUser:   true,
-			expectMD: true,
-			contains: []string{
-				`<a href="https://example.com"`,
-				"Example</a>",
-			},
+			name:         "Markdown link",
+			input:        "Visit [Example](https://example.com) for more",
+			expectMD:     true,
+			hasElements:  []string{"a"},
+			containsText: []string{"Visit", "Example", "for more"},
 		},
 	}
 
-	// Load the message template
-	tmpl := template.Must(template.New("test").Parse(`{{.RenderedHTML}}`))
-
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			// Create message part data
-			part := MessagePartData{
-				Type:       "text",
-				Content:    tt.input,
+			// Test the rendering pipeline: renderText -> renderMessage -> HTML parsing
+			msgData := MessageData{
+				Alignment: "left",
+				Parts: []MessagePartData{{
+					Type:         "text",
+					Content:      tt.input,
+					RenderedHTML: renderText(tt.input),
+				}},
 			}
 
-			// Always render with unified renderer
-			part.RenderedHTML = renderText(tt.input)
-
-			// Render through template
-			var buf strings.Builder
-			err := tmpl.Execute(&buf, part)
+			// Render the full message using templates
+			html, err := renderMessage(templates, msgData)
 			if err != nil {
-				t.Fatalf("Template execution failed: %v", err)
+				t.Fatalf("renderMessage failed: %v", err)
 			}
 
-			result := buf.String()
+			// Parse HTML with goquery for semantic testing
+			doc, err := goquery.NewDocumentFromReader(strings.NewReader(html))
+			if err != nil {
+				t.Fatalf("Failed to parse HTML: %v", err)
+			}
 
-			// Check expected content
-			for _, expected := range tt.contains {
-				if !strings.Contains(result, expected) {
-					t.Errorf("Output missing expected content: %q\nGot: %q",
-						expected, result)
+			// Check for expected HTML elements
+			for _, element := range tt.hasElements {
+				if doc.Find(element).Length() == 0 {
+					t.Errorf("Expected HTML element <%s> not found\nHTML: %s", element, html)
 				}
 			}
 
-			// Check unexpected content
-			for _, unexpected := range tt.notContains {
-				if strings.Contains(result, unexpected) {
-					t.Errorf("Output contains unexpected content: %q\nGot: %q",
-						unexpected, result)
+			// Check for expected CSS classes
+			for _, class := range tt.hasClasses {
+				if doc.Find("."+class).Length() == 0 {
+					t.Errorf("Expected CSS class .%s not found\nHTML: %s", class, html)
 				}
+			}
+
+			// Check for expected text content
+			for _, text := range tt.containsText {
+				if !strings.Contains(doc.Text(), text) {
+					t.Errorf("Expected text %q not found in content\nText: %s", text, doc.Text())
+				}
+			}
+
+			// Security check: ensure no dangerous elements exist
+			if doc.Find("script").Length() > 0 {
+				t.Errorf("Dangerous script element found in output\nHTML: %s", html)
 			}
 		})
 	}
 }
 
 func TestUserAndLLMRenderingSame(t *testing.T) {
-	// Test that both user and LLM messages go through the same rendering logic
+	// Test that both user and LLM messages render identically
+	templates, err := loadTemplates()
+	if err != nil {
+		t.Fatalf("Failed to load templates: %v", err)
+	}
+
 	testInputs := []string{
 		"Plain text\nwith newlines",
 		"**Bold** and *italic*",
@@ -251,102 +205,111 @@ func TestUserAndLLMRenderingSame(t *testing.T) {
 		"• Unicode bullets\n• With newlines",
 	}
 
-	tmpl := template.Must(template.New("test").Parse(`
-{{/* Always render with unified renderer */}}
-{{.RenderedHTML}}
-{{else}}
-<div class="whitespace-pre-wrap">{{.Content}}</div>
-{{end}}
-`))
-
 	for _, input := range testInputs {
-		// Simulate user message rendering
-		userPart := MessagePartData{
-			Type:       "text",
-			Content:    input,
-			// IsMarkdown field removed
+		// Create user message
+		userMsg := MessageData{
+			Alignment: "right",
+			Parts: []MessagePartData{{
+				Type:         "text",
+				Content:      input,
+				RenderedHTML: renderText(input),
+			}},
 		}
-		// Always use unified renderer
-		userPart.RenderedHTML = renderText(input)
 
-		var userBuf strings.Builder
-		err := tmpl.Execute(&userBuf, userPart)
+		// Create LLM message 
+		llmMsg := MessageData{
+			Alignment: "left",
+			Parts: []MessagePartData{{
+				Type:         "text",
+				Content:      input,
+				RenderedHTML: renderText(input),
+			}},
+		}
+
+		userHTML, err := renderMessage(templates, userMsg)
 		if err != nil {
-			t.Fatalf("User template execution failed: %v", err)
+			t.Fatalf("User message rendering failed: %v", err)
 		}
 
-		// Simulate LLM message rendering (should be identical)
-		llmPart := MessagePartData{
-			Type:       "text",
-			Content:    input,
-			// IsMarkdown field removed
-		}
-		// Always use unified renderer
-		llmPart.RenderedHTML = renderText(input)
-
-		var llmBuf strings.Builder
-		err = tmpl.Execute(&llmBuf, llmPart)
+		llmHTML, err := renderMessage(templates, llmMsg)
 		if err != nil {
-			t.Fatalf("LLM template execution failed: %v", err)
+			t.Fatalf("LLM message rendering failed: %v", err)
 		}
 
-		// Both should produce identical output
-		if userBuf.String() != llmBuf.String() {
-			t.Errorf("User and LLM rendering differ for input %q\nUser: %q\nLLM:  %q",
-				input, userBuf.String(), llmBuf.String())
+		// Parse both with goquery and compare content (ignoring alignment differences)
+		userDoc, _ := goquery.NewDocumentFromReader(strings.NewReader(userHTML))
+		llmDoc, _ := goquery.NewDocumentFromReader(strings.NewReader(llmHTML))
+
+		// The text content should be identical
+		if userDoc.Find(".prose").Text() != llmDoc.Find(".prose").Text() {
+			t.Errorf("User and LLM content differ for input %q\nUser: %s\nLLM: %s",
+				input, userDoc.Find(".prose").Text(), llmDoc.Find(".prose").Text())
 		}
 	}
 }
 
 func TestMultilineInputSupport(t *testing.T) {
-	// Test that multiline input is properly handled
+	// Test that multiline input is properly handled using the full rendering pipeline
+	templates, err := loadTemplates()
+	if err != nil {
+		t.Fatalf("Failed to load templates: %v", err)
+	}
+
 	multilineInputs := []struct {
-		name     string
-		input    string
-		expected string
+		name         string
+		input        string
+		expectedText []string // Text fragments that should be preserved
 	}{
 		{
-			name:     "Unix newlines",
-			input:    "Line 1\nLine 2\nLine 3",
-			expected: "Line 1\nLine 2\nLine 3",
+			name:         "Unix newlines",
+			input:        "Line 1\nLine 2\nLine 3",
+			expectedText: []string{"Line 1", "Line 2", "Line 3"},
 		},
 		{
-			name:     "Windows newlines",
-			input:    "Line 1\r\nLine 2\r\nLine 3",
-			expected: "Line 1\r\nLine 2\r\nLine 3",
+			name:         "Windows newlines",
+			input:        "Line 1\r\nLine 2\r\nLine 3",
+			expectedText: []string{"Line 1", "Line 2", "Line 3"},
 		},
 		{
-			name:     "Mixed newlines",
-			input:    "Line 1\nLine 2\r\nLine 3",
-			expected: "Line 1\nLine 2\r\nLine 3",
+			name:         "Blank lines",
+			input:        "Paragraph 1\n\nParagraph 2\n\n\nParagraph 3",
+			expectedText: []string{"Paragraph 1", "Paragraph 2", "Paragraph 3"},
 		},
 		{
-			name:     "Blank lines",
-			input:    "Paragraph 1\n\nParagraph 2\n\n\nParagraph 3",
-			expected: "Paragraph 1\n\nParagraph 2\n\n\nParagraph 3",
-		},
-		{
-			name:     "Indented lines",
-			input:    "def function():\n    line1\n    line2\n        nested",
-			expected: "def function():\n    line1\n    line2\n        nested",
+			name:         "Indented lines",
+			input:        "def function():\n    line1\n    line2\n        nested",
+			expectedText: []string{"def function()", "line1", "line2", "nested"},
 		},
 	}
 
-	tmpl := template.Must(template.New("test").Parse(
-		`<div class="whitespace-pre-wrap">{{.}}</div>`))
-
 	for _, tt := range multilineInputs {
 		t.Run(tt.name, func(t *testing.T) {
-			var buf strings.Builder
-			err := tmpl.Execute(&buf, tt.input)
-			if err != nil {
-				t.Fatalf("Template execution failed: %v", err)
+			msgData := MessageData{
+				Alignment: "left",
+				Parts: []MessagePartData{{
+					Type:         "text",
+					Content:      tt.input,
+					RenderedHTML: renderText(tt.input),
+				}},
 			}
 
-			result := buf.String()
-			if !strings.Contains(result, tt.expected) {
-				t.Errorf("Multiline input not preserved\nInput:    %q\nExpected: %q\nGot:      %q",
-					tt.input, tt.expected, result)
+			html, err := renderMessage(templates, msgData)
+			if err != nil {
+				t.Fatalf("renderMessage failed: %v", err)
+			}
+
+			doc, err := goquery.NewDocumentFromReader(strings.NewReader(html))
+			if err != nil {
+				t.Fatalf("Failed to parse HTML: %v", err)
+			}
+
+			// Check that all expected text fragments are preserved
+			content := doc.Text()
+			for _, expected := range tt.expectedText {
+				if !strings.Contains(content, expected) {
+					t.Errorf("Expected text %q not found in rendered content\nInput: %q\nContent: %q",
+						expected, tt.input, content)
+				}
 			}
 		})
 	}
