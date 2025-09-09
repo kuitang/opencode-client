@@ -1,20 +1,23 @@
 package main
 
 import (
+	"bufio"
 	"bytes"
 	"embed"
 	"encoding/json"
 	"flag"
 	"fmt"
 	"html/template"
-	"io"
 	"log"
 	"net/http"
 	"os"
 	"os/exec"
+	"regexp"
 	"strings"
 	"sync"
 	"time"
+
+	"github.com/russross/blackfriday/v2"
 )
 
 //go:embed templates/*.html
@@ -70,13 +73,52 @@ type MessageResponse struct {
 	Parts []MessagePart `json:"parts"`
 }
 
+type MessagePartData struct {
+	Type        string
+	Content     string
+	IsMarkdown  bool
+	RenderedHTML template.HTML
+	PartID      string // To identify updates to same part
+}
+
+// hasMarkdownPatterns checks if text contains common markdown patterns
+func hasMarkdownPatterns(text string) bool {
+	patterns := []string{
+		`\*\*[^*]+\*\*`,     // **bold**
+		`\*[^*]+\*`,         // *italic*
+		`^#{1,6}\s`,         // # headers
+		`^\d+\.\s`,          // 1. numbered lists
+		`^-\s`,              // - bullet points
+		"`[^`]+`",           // `code`
+		`\[.+\]\(.+\)`,      // [link](url)
+	}
+	
+	for _, pattern := range patterns {
+		if matched, _ := regexp.MatchString(pattern, text); matched {
+			return true
+		}
+	}
+	return false
+}
+
+// renderMarkdown converts markdown text to HTML
+func renderMarkdown(text string) template.HTML {
+	if hasMarkdownPatterns(text) {
+		html := blackfriday.Run([]byte(text))
+		return template.HTML(html)
+	}
+	return template.HTML(text)
+}
+
 type MessageData struct {
-	ID        string
-	Alignment string
-	Text      string
-	Provider  string
-	Model     string
-	HXSwapOOB bool
+	ID          string
+	Alignment   string
+	Text        string
+	Parts       []MessagePartData
+	Provider    string
+	Model       string
+	IsStreaming bool
+	HXSwapOOB   bool
 }
 
 // NewServer creates a new Server instance with properly initialized templates
@@ -325,12 +367,18 @@ func (s *Server) handleSend(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Render user message using template
+	// Render user message using template with markdown support
 	msgData := MessageData{
 		Alignment: "right",
 		Text:      message,
 		Provider:  provider,
 		Model:     model,
+		Parts: []MessagePartData{{
+			Type:         "text",
+			Content:      message,
+			IsMarkdown:   hasMarkdownPatterns(message),
+			RenderedHTML: renderMarkdown(message),
+		}},
 	}
 
 	w.Header().Set("Content-Type", "text/html")
@@ -415,99 +463,242 @@ func (s *Server) handleSSE(w http.ResponseWriter, r *http.Request) {
 
 	// Connect to opencode SSE
 	client := &http.Client{Timeout: 0}
-	req, _ := http.NewRequest("GET", fmt.Sprintf("http://localhost:%d/event", s.opencodePort), nil)
+	sseURL := fmt.Sprintf("http://localhost:%d/event", s.opencodePort)
+	log.Printf("Connecting to OpenCode SSE at: %s", sseURL)
+	req, _ := http.NewRequest("GET", sseURL, nil)
 	resp, err := client.Do(req)
 	if err != nil {
+		log.Printf("Failed to connect to OpenCode SSE: %v", err)
 		return
 	}
 	defer resp.Body.Close()
 
-	reader := resp.Body
-	buf := make([]byte, 4096)
-	currentMessage := ""
+	if resp.StatusCode != http.StatusOK {
+		log.Printf("OpenCode SSE returned status: %d", resp.StatusCode)
+		return
+	}
 
-	for {
-		n, err := reader.Read(buf)
-		if err != nil {
-			if err != io.EOF {
-				log.Printf("SSE read error: %v", err)
-			}
-			break
+	// Use bufio.Scanner - the idiomatic way to read SSE streams
+	scanner := bufio.NewScanner(resp.Body)
+	messageParts := make(map[string][]MessagePartData) // [messageID] = ordered slice of parts
+	messageFirstSent := make(map[string]bool)          // Track if first event sent for each message
+	messageRoles := make(map[string]string)            // Track message roles
+
+	log.Printf("Starting to read SSE stream from OpenCode")
+	for scanner.Scan() {
+		line := scanner.Text()
+
+		// Log every line for debugging
+		if line != "" {
+			log.Printf("SSE line: %s", line)
 		}
 
-		data := string(buf[:n])
-		lines := strings.Split(data, "\n")
+		// SSE lines starting with "data: " contain the actual data
+		if strings.HasPrefix(line, "data: ") {
+			jsonData := strings.TrimPrefix(line, "data: ")
+			var event map[string]interface{}
+			if err := json.Unmarshal([]byte(jsonData), &event); err != nil {
+				continue // Skip invalid JSON
+			}
 
-		for _, line := range lines {
-			if strings.HasPrefix(line, "data: ") {
-				jsonData := strings.TrimPrefix(line, "data: ")
-				var event map[string]interface{}
-				if err := json.Unmarshal([]byte(jsonData), &event); err == nil {
-					log.Printf("SSE event type: %v", event["type"])
-					if event["type"] == "message.part.updated" {
-						if props, ok := event["properties"].(map[string]interface{}); ok {
-							if part, ok := props["part"].(map[string]interface{}); ok {
-								log.Printf("SSE part sessionID: %v, our sessionID: %v", part["sessionID"], sessionID)
-								if part["sessionID"] == sessionID && part["type"] == "text" {
-									if text, ok := part["text"].(string); ok {
-										currentMessage = text
-										// Send update using template
-										msgData := MessageData{
-											ID:        fmt.Sprintf("assistant-%s", part["messageID"]),
-											Alignment: "left",
-											Text:      currentMessage,
-										}
-
-										var buf bytes.Buffer
-										if err := s.templates.ExecuteTemplate(&buf, "message", msgData); err == nil {
-											// SSE data must be on a single line - replace newlines with spaces
-											html := strings.ReplaceAll(buf.String(), "\n", " ")
-											html = strings.TrimSpace(html)
-											fmt.Fprintf(w, "event: message\n")
-											fmt.Fprintf(w, "data: %s\n\n", html)
-											flusher.Flush()
-										}
-									}
-								}
-							}
-						}
-					} else if event["type"] == "message.updated" {
-						if props, ok := event["properties"].(map[string]interface{}); ok {
-							if info, ok := props["info"].(map[string]interface{}); ok {
-								if info["sessionID"] == sessionID && info["role"] == "assistant" {
-									// Add model info
-									provider := info["providerID"]
-									model := info["modelID"]
-									messageID := info["id"]
-
-									// Use template with HXSwapOOB to update the existing message with final content + metadata
-									msgData := MessageData{
-										ID:        fmt.Sprintf("assistant-%s", messageID),
-										Alignment: "left",
-										Text:      currentMessage,
-										Provider:  fmt.Sprintf("%v", provider),
-										Model:     fmt.Sprintf("%v", model),
-										HXSwapOOB: true,
-									}
-
-									var buf bytes.Buffer
-									if err := s.templates.ExecuteTemplate(&buf, "message", msgData); err == nil {
-										// SSE data must be on a single line - replace newlines with spaces
-										html := strings.ReplaceAll(buf.String(), "\n", " ")
-										html = strings.TrimSpace(html)
-										fmt.Fprintf(w, "event: message\n")
-										fmt.Fprintf(w, "data: %s\n\n", html)
-										flusher.Flush()
-									}
-									currentMessage = ""
-								}
+			// Track message roles from message.updated events
+			if event["type"] == "message.updated" {
+				if props, ok := event["properties"].(map[string]interface{}); ok {
+					if info, ok := props["info"].(map[string]interface{}); ok {
+						if info["sessionID"] == sessionID {
+							msgID, _ := info["id"].(string)
+							role, _ := info["role"].(string)
+							if msgID != "" && role != "" {
+								messageRoles[msgID] = role
 							}
 						}
 					}
 				}
 			}
+
+			// Only process message.part.updated events for our session
+			if event["type"] == "message.part.updated" {
+				if props, ok := event["properties"].(map[string]interface{}); ok {
+					if part, ok := props["part"].(map[string]interface{}); ok {
+						// Check if this is for our session FIRST
+						if part["sessionID"] != sessionID {
+							continue
+						}
+
+						// Get the message ID and part ID
+						msgID, _ := part["messageID"].(string)
+						partID, _ := part["id"].(string)
+						
+						// Skip user messages - we only want to stream assistant messages
+						if role, exists := messageRoles[msgID]; exists && role == "user" {
+							continue
+						}
+
+						// Find existing part or append new one
+						var partIndex = -1
+						for i, existingPart := range messageParts[msgID] {
+							if existingPart.PartID == partID {
+								partIndex = i
+								break
+							}
+						}
+
+						var newPart MessagePartData
+						// Update the specific part
+						switch part["type"] {
+						case "text":
+							if text, ok := part["text"].(string); ok {
+								isMarkdown := hasMarkdownPatterns(text)
+								newPart = MessagePartData{
+									Type:         "text",
+									Content:      text,
+									IsMarkdown:   isMarkdown,
+									RenderedHTML: renderMarkdown(text),
+									PartID:       partID,
+								}
+							}
+						case "reasoning":
+							if text, ok := part["text"].(string); ok {
+								newPart = MessagePartData{
+									Type:    "reasoning",
+									Content: fmt.Sprintf("🤔 Reasoning:\n%s", text),
+									PartID:  partID,
+								}
+							}
+						case "tool":
+							// Store tool information for rendering
+							toolName, _ := part["tool"].(string)
+							if state, ok := part["state"].(map[string]interface{}); ok {
+								status, _ := state["status"].(string)
+								
+								// Start with tool header
+								var toolContent strings.Builder
+								toolContent.WriteString(fmt.Sprintf("Tool: %s (Status: %s)", toolName, status))
+								
+								// Add tool input if available
+								if input, ok := state["input"].(map[string]interface{}); ok {
+									toolContent.WriteString("\nInput: ")
+									for key, value := range input {
+										toolContent.WriteString(fmt.Sprintf("%s=%v ", key, value))
+									}
+								}
+								
+								// Add tool output if available
+								if output, ok := state["output"].(string); ok && output != "" {
+									toolContent.WriteString("\nOutput:\n" + output)
+								}
+								
+								newPart = MessagePartData{
+									Type:    "tool",
+									Content: toolContent.String(),
+									PartID:  partID,
+								}
+							}
+						case "file":
+							filename, _ := part["filename"].(string)
+							url, _ := part["url"].(string)
+							newPart = MessagePartData{
+								Type:    "file",
+								Content: fmt.Sprintf("📁 File: %s\nURL: %s", filename, url),
+								PartID:  partID,
+							}
+						case "snapshot":
+							newPart = MessagePartData{
+								Type:    "snapshot",
+								Content: "📸 Snapshot taken",
+								PartID:  partID,
+							}
+						case "patch":
+							newPart = MessagePartData{
+								Type:    "patch", 
+								Content: "🔧 Code patch applied",
+								PartID:  partID,
+							}
+						case "agent":
+							newPart = MessagePartData{
+								Type:    "agent",
+								Content: "🤖 Agent action",
+								PartID:  partID,
+							}
+						case "step-start":
+							newPart = MessagePartData{
+								Type:    "step-start",
+								Content: "▶️ Step started",
+								PartID:  partID,
+							}
+						case "step-finish":
+							// Mark message as complete
+							newPart = MessagePartData{
+								Type:    "step-finish",
+								Content: "✅ Step completed",
+								PartID:  partID,
+							}
+						}
+
+						// Update or append the part
+						if partIndex >= 0 {
+							// Update existing part
+							messageParts[msgID][partIndex] = newPart
+						} else if newPart.PartID != "" {
+							// Append new part
+							messageParts[msgID] = append(messageParts[msgID], newPart)
+						}
+
+						// Build complete message from all parts
+						completeParts := messageParts[msgID] // Use the slice directly - it's already ordered
+						var completeText strings.Builder
+						isStreaming := true
+						
+						for _, msgPart := range completeParts {
+							if msgPart.Type == "text" {
+								completeText.WriteString(msgPart.Content)
+							} else if msgPart.Type == "tool" {
+								completeText.WriteString("\n\n" + msgPart.Content)
+							} else if msgPart.Type == "step-finish" {
+								isStreaming = false
+							}
+						}
+
+						// Send SSE event to browser with complete message
+						msgData := MessageData{
+							ID:          fmt.Sprintf("assistant-%s", msgID),
+							Alignment:   "left",
+							Text:        completeText.String(),
+							Parts:       completeParts,
+							IsStreaming: isStreaming,
+							HXSwapOOB:   messageFirstSent[msgID], // Use OOB for updates after first send
+						}
+
+						var buf bytes.Buffer
+						if err := s.templates.ExecuteTemplate(&buf, "message", msgData); err == nil {
+							html := strings.TrimSpace(buf.String())
+
+							// Send multi-line HTML using multiple data: lines (SSE standard)
+							fmt.Fprintf(w, "event: message\n")
+							lines := strings.Split(html, "\n")
+							for _, line := range lines {
+								fmt.Fprintf(w, "data: %s\n", line)
+							}
+							fmt.Fprintf(w, "\n") // Empty line to end the event
+							flusher.Flush()
+							
+							// Mark that we've sent the first event for this message
+							if !messageFirstSent[msgID] {
+								messageFirstSent[msgID] = true
+							}
+						}
+					}
+				}
+			}
+			// Skip user messages entirely - we only care about assistant messages
+			// User messages will be handled by the normal POST/send flow
 		}
 	}
+
+	if err := scanner.Err(); err != nil {
+		log.Printf("SSE scanner error: %v", err)
+	}
+	log.Printf("SSE stream ended for session %s", sessionID)
 }
 
 func (s *Server) handleClear(w http.ResponseWriter, r *http.Request) {

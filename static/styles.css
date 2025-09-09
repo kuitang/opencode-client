@@ -113,3 +113,45 @@ select {
     font-size: 0.875rem;
     color: #666;
 }
+
+/* Streaming indicator animation */
+.message.streaming .message-bubble {
+    position: relative;
+}
+
+.message.streaming .message-bubble::after {
+    content: '...';
+    display: inline-block;
+    animation: dots 1.5s steps(4) infinite;
+    width: 20px;
+    text-align: left;
+}
+
+@keyframes dots {
+    0%, 20% {
+        content: '.';
+    }
+    40% {
+        content: '..';
+    }
+    60%, 100% {
+        content: '...';
+    }
+}
+
+/* Spacing between message parts */
+.message-text, .message-tool, .message-reasoning, 
+.message-file, .message-snapshot, .message-patch, 
+.message-agent, .message-step {
+    margin: 8px 0;
+}
+
+.message-text:first-child, .message-tool:first-child, 
+.message-reasoning:first-child {
+    margin-top: 0;
+}
+
+.message-text:last-child, .message-tool:last-child, 
+.message-reasoning:last-child {
+    margin-bottom: 0;
+}

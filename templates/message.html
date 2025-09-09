@@ -1,7 +1,41 @@
 {{define "message"}}
-<div class="message message-{{.Alignment}}"{{if .ID}} id="{{.ID}}"{{end}}{{if .HXSwapOOB}} hx-swap-oob="outerHTML:#{{.ID}}"{{end}}>
+<div class="message message-{{.Alignment}}{{if .IsStreaming}} streaming{{end}}"{{if .ID}} id="{{.ID}}"{{end}}{{if .HXSwapOOB}} hx-swap-oob="outerHTML:#{{.ID}}"{{end}}>
     <div class="message-bubble">
-        {{.Text}}
+        {{if .Parts}}
+            {{range .Parts}}
+                {{if eq .Type "text"}}
+                    <div class="message-text">
+                        {{if .IsMarkdown}}
+                            {{.RenderedHTML}}
+                        {{else}}
+                            {{.Content}}
+                        {{end}}
+                    </div>
+                {{else if eq .Type "reasoning"}}
+                    <div class="message-reasoning">
+                        <pre>{{.Content}}</pre>
+                    </div>
+                {{else if eq .Type "tool"}}
+                    <div class="message-tool">
+                        <pre>{{.Content}}</pre>
+                    </div>
+                {{else if eq .Type "file"}}
+                    <div class="message-file">{{.Content}}</div>
+                {{else if eq .Type "snapshot"}}
+                    <div class="message-snapshot">{{.Content}}</div>
+                {{else if eq .Type "patch"}}
+                    <div class="message-patch">{{.Content}}</div>
+                {{else if eq .Type "agent"}}
+                    <div class="message-agent">{{.Content}}</div>
+                {{else if eq .Type "step-start"}}
+                    <div class="message-step">{{.Content}}</div>
+                {{else if eq .Type "step-finish"}}
+                    <div class="message-step">{{.Content}}</div>
+                {{end}}
+            {{end}}
+        {{else}}
+            {{.Text}}
+        {{end}}
         {{if and .Provider .Model}}
         <div class="message-meta">{{.Provider}}/{{.Model}}</div>
         {{end}}
