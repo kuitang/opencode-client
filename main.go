@@ -12,6 +12,7 @@ import (
 	"net/http"
 	"os"
 	"os/exec"
+	"path/filepath"
 	"regexp"
 	"strings"
 	"sync"
@@ -29,6 +30,7 @@ var staticFS embed.FS
 type Server struct {
 	opencodePort int
 	opencodeCmd  *exec.Cmd
+	opencodeDir  string // Temporary directory for opencode
 	sessions     map[string]string // cookie -> opencode session ID
 	mu           sync.RWMutex
 	providers    []Provider
@@ -164,6 +166,12 @@ func main() {
 	// Wait for opencode to be ready
 	log.Printf("Waiting for opencode to be ready...")
 	time.Sleep(2 * time.Second)
+	
+	// CRITICAL: Verify opencode is running in the isolated directory
+	if err := server.verifyOpencodeIsolation(); err != nil {
+		server.stopOpencodeServer()
+		log.Fatalf("CRITICAL SECURITY ERROR: %v", err)
+	}
 
 	// Load providers
 	log.Printf("Loading providers from opencode...")
@@ -188,16 +196,115 @@ func main() {
 }
 
 func (s *Server) startOpencodeServer() error {
+	// Create a temporary directory for opencode to work in
+	tmpDir, err := os.MkdirTemp("", "opencode-chat-*")
+	if err != nil {
+		return fmt.Errorf("failed to create temp directory: %w", err)
+	}
+	s.opencodeDir = tmpDir
+	log.Printf("SECURITY: Created isolated temporary directory for opencode: %s", tmpDir)
+	
+	// Create a marker file to verify isolation
+	markerPath := filepath.Join(tmpDir, ".opencode-isolation-marker")
+	if err := os.WriteFile(markerPath, []byte("opencode should run here"), 0644); err != nil {
+		os.RemoveAll(tmpDir)
+		return fmt.Errorf("failed to create isolation marker: %w", err)
+	}
+	
+	// Verify we're NOT in the user's working directory
+	userCwd, _ := os.Getwd()
+	if strings.HasPrefix(tmpDir, userCwd) || strings.HasPrefix(userCwd, tmpDir) {
+		os.RemoveAll(tmpDir)
+		return fmt.Errorf("CRITICAL SECURITY ERROR: temp directory %s overlaps with user directory %s", tmpDir, userCwd)
+	}
+	
+	// Start opencode in the temporary directory
 	s.opencodeCmd = exec.Command("opencode", "serve", "--port", fmt.Sprintf("%d", s.opencodePort))
+	s.opencodeCmd.Dir = tmpDir // CRITICAL: Run opencode in the temp directory
 	s.opencodeCmd.Stdout = os.Stdout
 	s.opencodeCmd.Stderr = os.Stderr
-	return s.opencodeCmd.Start()
+	
+	// Add environment variable to make it clear where opencode should run
+	s.opencodeCmd.Env = append(os.Environ(), fmt.Sprintf("OPENCODE_WORKDIR=%s", tmpDir))
+	
+	if err := s.opencodeCmd.Start(); err != nil {
+		os.RemoveAll(tmpDir)
+		return fmt.Errorf("failed to start opencode: %w", err)
+	}
+	
+	log.Printf("SECURITY: opencode process started with PID %d in isolated directory %s", 
+		s.opencodeCmd.Process.Pid, tmpDir)
+	return nil
 }
 
 func (s *Server) stopOpencodeServer() {
 	if s.opencodeCmd != nil && s.opencodeCmd.Process != nil {
 		s.opencodeCmd.Process.Kill()
 	}
+	
+	// Clean up the temporary directory
+	if s.opencodeDir != "" {
+		log.Printf("Cleaning up temporary directory: %s", s.opencodeDir)
+		if err := os.RemoveAll(s.opencodeDir); err != nil {
+			log.Printf("Warning: failed to clean up temp directory %s: %v", s.opencodeDir, err)
+		}
+	}
+}
+
+// verifyOpencodeIsolation verifies opencode is running in the isolated temporary directory
+func (s *Server) verifyOpencodeIsolation() error {
+	// Wait a bit for opencode to fully initialize
+	time.Sleep(500 * time.Millisecond)
+	
+	// Call the /path endpoint to get opencode's current working directory
+	resp, err := http.Get(fmt.Sprintf("http://localhost:%d/path", s.opencodePort))
+	if err != nil {
+		return fmt.Errorf("failed to query opencode /path endpoint: %w", err)
+	}
+	defer resp.Body.Close()
+	
+	// The /path endpoint returns: {"state":"...", "config":"...", "worktree":"...", "directory":"..."}
+	var pathResponse struct {
+		State     string `json:"state"`
+		Config    string `json:"config"`
+		Worktree  string `json:"worktree"`
+		Directory string `json:"directory"`
+	}
+	
+	if err := json.NewDecoder(resp.Body).Decode(&pathResponse); err != nil {
+		return fmt.Errorf("failed to decode /path response: %w", err)
+	}
+	
+	// Check if directory is empty
+	if pathResponse.Directory == "" {
+		return fmt.Errorf("opencode /path endpoint returned empty directory - opencode may not be running correctly")
+	}
+	
+	// Verify the directory matches our temporary directory
+	if pathResponse.Directory != s.opencodeDir {
+		return fmt.Errorf("opencode is NOT running in isolated directory! Expected: %s, Got: %s", 
+			s.opencodeDir, pathResponse.Directory)
+	}
+	
+	// Additional safety check: ensure it's not in the user's working directory
+	userCwd, _ := os.Getwd()
+	if strings.HasPrefix(pathResponse.Directory, userCwd) {
+		return fmt.Errorf("opencode is running in user's directory %s instead of isolated temp directory", 
+			pathResponse.Directory)
+	}
+	
+	// Verify it's in the system temp directory
+	systemTempDir := os.TempDir()
+	if !strings.HasPrefix(pathResponse.Directory, systemTempDir) {
+		return fmt.Errorf("opencode directory %s is not in system temp directory %s", 
+			pathResponse.Directory, systemTempDir)
+	}
+	
+	log.Printf("✓ SECURITY VERIFIED: opencode is correctly isolated in: %s", pathResponse.Directory)
+	log.Printf("  - State directory: %s", pathResponse.State)
+	log.Printf("  - Config directory: %s", pathResponse.Config)
+	log.Printf("  - Working directory: %s", pathResponse.Directory)
+	return nil
 }
 
 func (s *Server) loadProviders() error {
