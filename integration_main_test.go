@@ -74,10 +74,10 @@ func TestIndexPage(t *testing.T) {
 		t.Error("Model selector not found")
 	}
 
-	// Check HTMX attributes
-	form := doc.Find("form[hx-post='/send']")
-	if form.Length() == 0 {
-		t.Error("Send form with hx-post not found")
+	// Check HTMX attributes - hx-post is on the textarea and button, not the form
+	sendElements := doc.Find("[hx-post='/send']")
+	if sendElements.Length() == 0 {
+		t.Error("Send elements with hx-post not found")
 	}
 
 	// Check SSE setup
@@ -324,19 +324,20 @@ func TestGetMessages(t *testing.T) {
 		t.Fatalf("Failed to parse HTML: %v", err)
 	}
 
-	// Check for message elements
-	messages := doc.Find(".message")
+	// Check for message elements - new template uses flex containers
+	messages := doc.Find("div.my-2.flex")
 	if messages.Length() == 0 {
 		t.Error("No messages found in response")
 	}
 
-	// Check for user message (right-aligned)
-	userMsg := doc.Find(".message-right")
+	// Check for user message (right-aligned with justify-end)
+	userMsg := doc.Find("div.justify-end")
 	if userMsg.Length() == 0 {
 		t.Error("User message not found")
 	}
 
-	msgText := userMsg.Find(".message-bubble").Text()
+	// Get the message text from the rounded container
+	msgText := userMsg.Find("div.rounded-lg").Text()
 	if !strings.Contains(msgText, "Test message for retrieval") {
 		t.Errorf("Expected message text not found, got: %s", msgText)
 	}

@@ -66,8 +66,18 @@ type MessageInfo struct {
 }
 
 type MessagePart struct {
-	Type string `json:"type"`
-	Text string `json:"text,omitempty"`
+	ID        string                 `json:"id,omitempty"`
+	MessageID string                 `json:"messageID,omitempty"`
+	SessionID string                 `json:"sessionID,omitempty"`
+	Type      string                 `json:"type"`
+	Text      string                 `json:"text,omitempty"`
+	Tool      string                 `json:"tool,omitempty"`
+	CallID    string                 `json:"callID,omitempty"`
+	State     map[string]interface{} `json:"state,omitempty"`
+	Time      struct {
+		Start string `json:"start,omitempty"`
+		End   string `json:"end,omitempty"`
+	} `json:"time,omitempty"`
 }
 
 type MessageResponse struct {
@@ -1027,14 +1037,24 @@ func (s *Server) handleMessages(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Content-Type", "text/html")
 
 	for _, msg := range messages {
-		text := ""
+		// Transform all parts using the same rendering pipeline as SSE
+		var parts []MessagePartData
+		hasContent := false
+		
 		for _, part := range msg.Parts {
-			if part.Type == "text" {
-				text += part.Text
+			transformedPart := transformMessagePart(s.templates, part)
+			parts = append(parts, transformedPart)
+			
+			// Check if this message has any visible content
+			if part.Type == "text" && part.Text != "" {
+				hasContent = true
+			} else if part.Type != "" {
+				hasContent = true
 			}
 		}
-
-		if text == "" {
+		
+		// Skip messages with no content
+		if !hasContent {
 			continue
 		}
 
@@ -1044,8 +1064,9 @@ func (s *Server) handleMessages(w http.ResponseWriter, r *http.Request) {
 		}
 
 		msgData := MessageData{
+			ID:        msg.Info.ID,
 			Alignment: alignment,
-			Text:      text,
+			Parts:     parts,
 			Provider:  msg.Info.ProviderID,
 			Model:     msg.Info.ModelID,
 		}

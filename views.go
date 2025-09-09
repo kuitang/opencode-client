@@ -221,3 +221,114 @@ func renderMessage(templates *template.Template, msg MessageData) (string, error
 	}
 	return buf.String(), nil
 }
+
+// transformMessagePart transforms a MessagePart from OpenCode API to MessagePartData with proper rendering
+func transformMessagePart(templates *template.Template, part MessagePart) MessagePartData {
+	switch part.Type {
+	case "text":
+		renderedHTML := renderText(part.Text)
+		return MessagePartData{
+			Type:         "text",
+			Content:      part.Text,
+			RenderedHTML: renderedHTML,
+			PartID:       part.ID,
+		}
+		
+	case "tool":
+		status, _ := part.State["status"].(string)
+		input, _ := part.State["input"].(map[string]interface{})
+		output, _ := part.State["output"].(string)
+		
+		renderedHTML := renderToolDetails(templates, part.Tool, status, input, output)
+		
+		// Create text fallback
+		var toolContent strings.Builder
+		toolContent.WriteString(fmt.Sprintf("Tool: %s (Status: %s)", part.Tool, status))
+		if len(input) > 0 {
+			toolContent.WriteString("\nInput: ")
+			for key, value := range input {
+				toolContent.WriteString(fmt.Sprintf("%s=%v ", key, value))
+			}
+		}
+		if output != "" {
+			toolContent.WriteString("\nOutput:\n" + output)
+		}
+		
+		return MessagePartData{
+			Type:         "tool",
+			Content:      toolContent.String(),
+			RenderedHTML: renderedHTML,
+			PartID:       part.ID,
+		}
+		
+	case "reasoning":
+		reasoningText := fmt.Sprintf("🤔 Reasoning:\n%s", part.Text)
+		return MessagePartData{
+			Type:    "reasoning",
+			Content: reasoningText,
+			PartID:  part.ID,
+		}
+		
+	case "step-start":
+		badgeHTML := template.HTML(`<div class="flex items-center gap-2 px-3 py-1 bg-yellow-100 text-yellow-800 rounded-full text-sm my-2 w-fit">
+			<span>▶️</span>
+			<span>Step started</span>
+		</div>`)
+		return MessagePartData{
+			Type:         "step-start",
+			Content:      "▶️ Step started",
+			RenderedHTML: badgeHTML,
+			PartID:       part.ID,
+		}
+		
+	case "step-finish":
+		badgeHTML := template.HTML(`<div class="flex items-center gap-2 px-3 py-1 bg-green-100 text-green-800 rounded-full text-sm my-2 w-fit">
+			<span>✅</span>
+			<span>Step completed</span>
+		</div>`)
+		return MessagePartData{
+			Type:         "step-finish",
+			Content:      "✅ Step completed",
+			RenderedHTML: badgeHTML,
+			PartID:       part.ID,
+		}
+		
+	case "file":
+		filename, _ := part.State["filename"].(string)
+		url, _ := part.State["url"].(string)
+		return MessagePartData{
+			Type:    "file",
+			Content: fmt.Sprintf("📁 File: %s\nURL: %s", filename, url),
+			PartID:  part.ID,
+		}
+		
+	case "snapshot":
+		return MessagePartData{
+			Type:    "snapshot",
+			Content: "📸 Snapshot taken",
+			PartID:  part.ID,
+		}
+		
+	case "patch":
+		return MessagePartData{
+			Type:    "patch",
+			Content: "🔧 Code patch applied",
+			PartID:  part.ID,
+		}
+		
+	case "agent":
+		return MessagePartData{
+			Type:    "agent",
+			Content: "🤖 Agent action",
+			PartID:  part.ID,
+		}
+		
+	default:
+		// Handle unknown part types
+		return MessagePartData{
+			Type:    part.Type,
+			Content: part.Text,
+			PartID:  part.ID,
+		}
+	}
+}
