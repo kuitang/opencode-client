@@ -20,7 +20,9 @@ func TestServerStartup(t *testing.T) {
 	defer server.stopOpencodeServer()
 
 	// Wait for server to be ready
-	time.Sleep(3 * time.Second)
+	if err := WaitForOpencodeReady(server.opencodePort, 10*time.Second); err != nil {
+		t.Fatalf("Opencode server not ready: %v", err)
+	}
 
 	// Test loading providers
 	err = server.loadProviders()
@@ -57,7 +59,9 @@ func TestSessionManagement(t *testing.T) {
 		t.Fatalf("Failed to start opencode: %v", err)
 	}
 	defer server.stopOpencodeServer()
-	time.Sleep(2 * time.Second)
+	if err := WaitForOpencodeReady(server.opencodePort, 10*time.Second); err != nil {
+		t.Fatalf("Opencode server not ready: %v", err)
+	}
 
 	// Test session creation
 	sessionID, err := server.getOrCreateSession("test-cookie-1")
@@ -102,7 +106,9 @@ func TestConcurrentSessions(t *testing.T) {
 		t.Fatalf("Failed to start opencode: %v", err)
 	}
 	defer server.stopOpencodeServer()
-	time.Sleep(2 * time.Second)
+	if err := WaitForOpencodeReady(server.opencodePort, 10*time.Second); err != nil {
+		t.Fatalf("Opencode server not ready: %v", err)
+	}
 
 	// Test concurrent session creation
 	done := make(chan bool, 10)

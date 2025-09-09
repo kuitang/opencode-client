@@ -10,7 +10,7 @@ import (
 
 // Test that message templates render with correct IDs
 func TestMessageTemplateIDs(t *testing.T) {
-	server, err := NewServer(9999)
+	server, err := NewServer(GetTestPort())
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -113,7 +113,7 @@ func TestMessageTemplateIDs(t *testing.T) {
 
 // Test that message metadata renders correctly
 func TestMessageMetadata(t *testing.T) {
-	server, err := NewServer(9999)
+	server, err := NewServer(GetTestPort())
 	if err != nil {
 		t.Fatal(err)
 	}

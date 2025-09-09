@@ -3,6 +3,7 @@ package main
 import (
 	"bufio"
 	"bytes"
+	"context"
 	"embed"
 	"encoding/json"
 	"flag"
@@ -12,10 +13,12 @@ import (
 	"net/http"
 	"os"
 	"os/exec"
+	"os/signal"
 	"path/filepath"
 	"regexp"
 	"strings"
 	"sync"
+	"syscall"
 	"time"
 
 	"github.com/russross/blackfriday/v2"
@@ -161,11 +164,18 @@ func main() {
 	if err := server.startOpencodeServer(); err != nil {
 		log.Fatalf("Failed to start opencode server: %v", err)
 	}
-	defer server.stopOpencodeServer()
+	// Ensure cleanup happens even on panic
+	defer func() {
+		log.Println("Defer: Cleaning up opencode server")
+		server.stopOpencodeServer()
+	}()
 
 	// Wait for opencode to be ready
 	log.Printf("Waiting for opencode to be ready...")
-	time.Sleep(2 * time.Second)
+	if err := waitForOpencodeReady(server.opencodePort, 10*time.Second); err != nil {
+		server.stopOpencodeServer()
+		log.Fatalf("Opencode server not ready: %v", err)
+	}
 	
 	// CRITICAL: Verify opencode is running in the isolated directory
 	if err := server.verifyOpencodeIsolation(); err != nil {
@@ -189,15 +199,43 @@ func main() {
 	http.HandleFunc("/models", server.handleModels)
 	http.Handle("/static/", http.FileServer(http.FS(staticFS)))
 
-	log.Printf("Starting server on port %d (opencode on %d)\n", *port, server.opencodePort)
-	if err := http.ListenAndServe(fmt.Sprintf(":%d", *port), nil); err != nil {
-		log.Fatalf("Server failed: %v", err)
+	// Set up signal handling for graceful shutdown
+	sigChan := make(chan os.Signal, 1)
+	signal.Notify(sigChan, os.Interrupt, syscall.SIGTERM)
+	
+	// Create HTTP server with context
+	srv := &http.Server{
+		Addr: fmt.Sprintf(":%d", *port),
 	}
+	
+	// Start server in a goroutine
+	go func() {
+		log.Printf("Starting server on port %d (opencode on %d)\n", *port, server.opencodePort)
+		if err := srv.ListenAndServe(); err != nil && err != http.ErrServerClosed {
+			log.Fatalf("Server failed: %v", err)
+		}
+	}()
+	
+	// Wait for interrupt signal
+	sig := <-sigChan
+	log.Printf("\nReceived signal %v, shutting down gracefully...", sig)
+	
+	// Create a context with timeout for shutdown
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	
+	// Shutdown the HTTP server
+	if err := srv.Shutdown(ctx); err != nil {
+		log.Printf("HTTP server shutdown error: %v", err)
+	}
+	
+	// Note: opencode cleanup happens via defer
+	log.Printf("Shutdown complete")
 }
 
 func (s *Server) startOpencodeServer() error {
-	// Create a temporary directory for opencode to work in
-	tmpDir, err := os.MkdirTemp("", "opencode-chat-*")
+	// Create a temporary directory for opencode to work in, including PID in name
+	tmpDir, err := os.MkdirTemp("", fmt.Sprintf("opencode-chat-pid%d-*", os.Getpid()))
 	if err != nil {
 		return fmt.Errorf("failed to create temp directory: %w", err)
 	}
@@ -238,23 +276,81 @@ func (s *Server) startOpencodeServer() error {
 }
 
 func (s *Server) stopOpencodeServer() {
-	if s.opencodeCmd != nil && s.opencodeCmd.Process != nil {
-		s.opencodeCmd.Process.Kill()
+	// Prevent double cleanup
+	if s.opencodeCmd == nil && s.opencodeDir == "" {
+		return
 	}
 	
-	// Clean up the temporary directory
+	// First, stop the opencode process completely
+	processStoppedSuccessfully := true
+	if s.opencodeCmd != nil && s.opencodeCmd.Process != nil {
+		log.Printf("Stopping opencode server (PID: %d)", s.opencodeCmd.Process.Pid)
+		// Try graceful shutdown first
+		if err := s.opencodeCmd.Process.Signal(os.Interrupt); err != nil {
+			log.Printf("Failed to send interrupt signal: %v", err)
+			processStoppedSuccessfully = false
+		}
+		
+		// Give it 2 seconds to gracefully shutdown
+		done := make(chan error, 1)
+		go func() {
+			defer close(done) // Ensure channel is closed to prevent leaks
+			done <- s.opencodeCmd.Wait()
+		}()
+		
+		select {
+		case err := <-done:
+			if err != nil {
+				log.Printf("Opencode server exited with error: %v", err)
+			} else {
+				log.Println("Opencode server stopped gracefully")
+			}
+		case <-time.After(2 * time.Second):
+			log.Println("Force killing opencode server")
+			if err := s.opencodeCmd.Process.Kill(); err != nil {
+				log.Printf("Failed to force kill process: %v", err)
+				processStoppedSuccessfully = false
+			} else {
+				// Wait for the kill to complete and drain the done channel
+				<-done
+			}
+		}
+		s.opencodeCmd = nil // Prevent double cleanup
+	}
+	
+	// Only clean up directory after process is stopped (or we tried our best)
 	if s.opencodeDir != "" {
-		log.Printf("Cleaning up temporary directory: %s", s.opencodeDir)
+		if processStoppedSuccessfully {
+			log.Printf("Cleaning up temporary directory: %s", s.opencodeDir)
+		} else {
+			log.Printf("WARNING: Process may still be running, attempting directory cleanup anyway: %s", s.opencodeDir)
+		}
+		
 		if err := os.RemoveAll(s.opencodeDir); err != nil {
 			log.Printf("Warning: failed to clean up temp directory %s: %v", s.opencodeDir, err)
 		}
+		s.opencodeDir = "" // Prevent double cleanup
 	}
+}
+
+// waitForOpencodeReady polls the opencode server until it's ready
+func waitForOpencodeReady(port int, timeout time.Duration) error {
+	start := time.Now()
+	for time.Since(start) < timeout {
+		resp, err := http.Get(fmt.Sprintf("http://localhost:%d/session", port))
+		if err == nil {
+			resp.Body.Close()
+			if resp.StatusCode == http.StatusOK || resp.StatusCode == http.StatusCreated {
+				return nil
+			}
+		}
+		time.Sleep(100 * time.Millisecond)
+	}
+	return fmt.Errorf("opencode server on port %d not ready after %v", port, timeout)
 }
 
 // verifyOpencodeIsolation verifies opencode is running in the isolated temporary directory
 func (s *Server) verifyOpencodeIsolation() error {
-	// Wait a bit for opencode to fully initialize
-	time.Sleep(500 * time.Millisecond)
 	
 	// Call the /path endpoint to get opencode's current working directory
 	resp, err := http.Get(fmt.Sprintf("http://localhost:%d/path", s.opencodePort))
@@ -600,6 +696,7 @@ func (s *Server) handleSSE(w http.ResponseWriter, r *http.Request) {
 			jsonData := strings.TrimPrefix(line, "data: ")
 			var event map[string]interface{}
 			if err := json.Unmarshal([]byte(jsonData), &event); err != nil {
+				log.Printf("SSE: Failed to parse JSON data: %v, raw data: %s", err, jsonData)
 				continue // Skip invalid JSON
 			}
 

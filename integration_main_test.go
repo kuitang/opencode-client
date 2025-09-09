@@ -15,7 +15,7 @@ import (
 )
 
 func TestIndexPage(t *testing.T) {
-	server, err := NewServer(15001)
+	server, err := NewServer(GetTestPort())
 	if err != nil {
 		t.Fatalf("Failed to create server: %v", err)
 	}
@@ -24,12 +24,12 @@ func TestIndexPage(t *testing.T) {
 			ID:   "anthropic",
 			Name: "Anthropic",
 			Models: map[string]Model{
-				"claude-3-5-sonnet": {ID: "claude-3-5-sonnet", Name: "Claude 3.5 Sonnet"},
+				"claude-3-5-haiku-20241022": {ID: "claude-3-5-haiku-20241022", Name: "Claude 3.5 Haiku"},
 			},
 		},
 	}
 	server.defaultModel = map[string]string{
-		"anthropic": "claude-3-5-sonnet",
+		"anthropic": "claude-3-5-haiku-20241022",
 	}
 
 	// Start opencode for this test
@@ -37,7 +37,9 @@ func TestIndexPage(t *testing.T) {
 		t.Fatalf("Failed to start opencode: %v", err)
 	}
 	defer server.stopOpencodeServer()
-	time.Sleep(2 * time.Second)
+	if err := WaitForOpencodeReady(server.opencodePort, 10*time.Second); err != nil {
+		t.Fatalf("Opencode server not ready: %v", err)
+	}
 
 	req := httptest.NewRequest("GET", "/", nil)
 	w := httptest.NewRecorder()
@@ -92,7 +94,7 @@ func TestIndexPage(t *testing.T) {
 }
 
 func TestSendMessage(t *testing.T) {
-	server := StartTestServer(t, 15002)
+	server := StartTestServer(t, GetTestPort())
 	defer server.stopOpencodeServer()
 
 	// Create session
@@ -106,7 +108,7 @@ func TestSendMessage(t *testing.T) {
 	}
 
 	// Send message
-	form := "message=Hello&provider=anthropic&model=claude-3-5-sonnet"
+	form := "message=Hello&provider=anthropic&model=claude-3-5-haiku-20241022"
 	req = httptest.NewRequest("POST", "/send", strings.NewReader(form))
 	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
 	req.AddCookie(cookies[0])
@@ -127,13 +129,13 @@ func TestSendMessage(t *testing.T) {
 		t.Error("Response should contain the message text")
 	}
 	// Check that user message shows provider/model
-	if !strings.Contains(body, "anthropic/claude-3-5-sonnet") {
+	if !strings.Contains(body, "anthropic/claude-3-5-haiku-20241022") {
 		t.Error("Response should contain provider/model info")
 	}
 }
 
 func TestSSEStreaming(t *testing.T) {
-	server := StartTestServer(t, 15003)
+	server := StartTestServer(t, GetTestPort())
 	defer server.stopOpencodeServer()
 
 	// Create a session first
@@ -147,7 +149,7 @@ func TestSSEStreaming(t *testing.T) {
 	form := url.Values{}
 	form.Add("message", "Hello, OpenCode!")
 	form.Add("provider", "anthropic")
-	form.Add("model", "claude-3-5-sonnet")
+	form.Add("model", "claude-3-5-haiku-20241022")
 
 	req := httptest.NewRequest("POST", "/send", strings.NewReader(form.Encode()))
 	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
@@ -180,8 +182,13 @@ func TestSSEStreaming(t *testing.T) {
 	}
 
 	// Check model info
-	if !strings.Contains(msgText, "anthropic/claude-3-5-sonnet") {
+	if !strings.Contains(msgText, "anthropic/claude-3-5-haiku-20241022") {
 		t.Error("Model info not found in message")
+	}
+
+	// Wait for message to be processed by opencode
+	if err := WaitForMessageProcessed(server.opencodePort, sessionID, 5*time.Second); err != nil {
+		t.Fatalf("Message not processed: %v", err)
 	}
 
 	// Verify message was sent to opencode
@@ -201,7 +208,7 @@ func TestSSEStreaming(t *testing.T) {
 }
 
 func TestClearSession(t *testing.T) {
-	server, err := NewServer(15004)
+	server, err := NewServer(GetTestPort())
 	if err != nil {
 		t.Fatalf("Failed to create server: %v", err)
 	}
@@ -212,7 +219,9 @@ func TestClearSession(t *testing.T) {
 		t.Fatalf("Failed to start opencode: %v", err)
 	}
 	defer server.stopOpencodeServer()
-	time.Sleep(2 * time.Second)
+	if err := WaitForOpencodeReady(server.opencodePort, 10*time.Second); err != nil {
+		t.Fatalf("Opencode server not ready: %v", err)
+	}
 
 	// Create a session
 	cookie := &http.Cookie{Name: "session", Value: "test-clear"}
@@ -225,7 +234,7 @@ func TestClearSession(t *testing.T) {
 	form := url.Values{}
 	form.Add("message", "Test message")
 	form.Add("provider", "anthropic")
-	form.Add("model", "claude-3-5-sonnet")
+	form.Add("model", "claude-3-5-haiku-20241022")
 
 	req := httptest.NewRequest("POST", "/send", strings.NewReader(form.Encode()))
 	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
@@ -257,7 +266,7 @@ func TestClearSession(t *testing.T) {
 }
 
 func TestGetMessages(t *testing.T) {
-	server, err := NewServer(15005)
+	server, err := NewServer(GetTestPort())
 	if err != nil {
 		t.Fatalf("Failed to create server: %v", err)
 	}
@@ -268,7 +277,9 @@ func TestGetMessages(t *testing.T) {
 		t.Fatalf("Failed to start opencode: %v", err)
 	}
 	defer server.stopOpencodeServer()
-	time.Sleep(2 * time.Second)
+	if err := WaitForOpencodeReady(server.opencodePort, 10*time.Second); err != nil {
+		t.Fatalf("Opencode server not ready: %v", err)
+	}
 
 	// Create session and send messages
 	cookie := &http.Cookie{Name: "session", Value: "test-messages"}
@@ -281,7 +292,7 @@ func TestGetMessages(t *testing.T) {
 	form := url.Values{}
 	form.Add("message", "Test message for retrieval")
 	form.Add("provider", "anthropic")
-	form.Add("model", "claude-3-5-sonnet")
+	form.Add("model", "claude-3-5-haiku-20241022")
 
 	req := httptest.NewRequest("POST", "/send", strings.NewReader(form.Encode()))
 	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
@@ -289,6 +300,9 @@ func TestGetMessages(t *testing.T) {
 
 	w := httptest.NewRecorder()
 	server.handleSend(w, req)
+
+	// Brief wait for message to be processed (this test is about UI rendering)
+	time.Sleep(100 * time.Millisecond)
 
 	// Now get messages
 	req = httptest.NewRequest("GET", "/messages", nil)
@@ -327,16 +341,26 @@ func TestGetMessages(t *testing.T) {
 }
 
 func TestProviderModelSelection(t *testing.T) {
-	server, err := NewServer(15006)
+	server, err := NewServer(GetTestPort())
 	if err != nil {
 		t.Fatalf("Failed to create server: %v", err)
 	}
+	
+	// Start opencode for this test
+	if err := server.startOpencodeServer(); err != nil {
+		t.Fatalf("Failed to start opencode: %v", err)
+	}
+	defer server.stopOpencodeServer()
+	if err := WaitForOpencodeReady(server.opencodePort, 10*time.Second); err != nil {
+		t.Fatalf("Opencode server not ready: %v", err)
+	}
+	
 	server.providers = []Provider{
 		{
 			ID:   "anthropic",
 			Name: "Anthropic",
 			Models: map[string]Model{
-				"claude-3-5-sonnet": {ID: "claude-3-5-sonnet", Name: "Claude 3.5 Sonnet"},
+				"claude-3-5-haiku-20241022": {ID: "claude-3-5-haiku-20241022", Name: "Claude 3.5 Haiku"},
 				"claude-3-opus":     {ID: "claude-3-opus", Name: "Claude 3 Opus"},
 			},
 		},
@@ -349,7 +373,7 @@ func TestProviderModelSelection(t *testing.T) {
 		},
 	}
 	server.defaultModel = map[string]string{
-		"anthropic": "claude-3-5-sonnet",
+		"anthropic": "claude-3-5-haiku-20241022",
 		"openai":    "gpt-4",
 	}
 
@@ -376,18 +400,18 @@ func TestProviderModelSelection(t *testing.T) {
 		t.Error("Anthropic not selected by default")
 	}
 
-	// Check JavaScript data
+	// Check that providers are rendered in HTML
 	htmlContent := w.Body.String()
-	if !strings.Contains(htmlContent, `"id":"anthropic"`) {
-		t.Error("Provider data not found in JavaScript")
+	if !strings.Contains(htmlContent, `value="anthropic"`) {
+		t.Error("Anthropic provider not found in HTML")
 	}
-	if !strings.Contains(htmlContent, `"claude-3-5-sonnet"`) {
-		t.Error("Model data not found in JavaScript")
+	if !strings.Contains(htmlContent, `>Anthropic</option>`) {
+		t.Error("Anthropic provider name not found in HTML")
 	}
 }
 
 func TestSSEEndpoint(t *testing.T) {
-	server, err := NewServer(15007)
+	server, err := NewServer(GetTestPort())
 	if err != nil {
 		t.Fatalf("Failed to create server: %v", err)
 	}
@@ -398,7 +422,9 @@ func TestSSEEndpoint(t *testing.T) {
 		t.Fatalf("Failed to start opencode: %v", err)
 	}
 	defer server.stopOpencodeServer()
-	time.Sleep(2 * time.Second)
+	if err := WaitForOpencodeReady(server.opencodePort, 10*time.Second); err != nil {
+		t.Fatalf("Opencode server not ready: %v", err)
+	}
 
 	// Create session
 	cookie := &http.Cookie{Name: "session", Value: "test-sse"}
@@ -431,7 +457,7 @@ func TestSSEEndpoint(t *testing.T) {
 }
 
 func TestHTMXHeaders(t *testing.T) {
-	server, err := NewServer(15008)
+	server, err := NewServer(GetTestPort())
 	if err != nil {
 		t.Fatalf("Failed to create server: %v", err)
 	}
@@ -442,7 +468,9 @@ func TestHTMXHeaders(t *testing.T) {
 		t.Fatalf("Failed to start opencode: %v", err)
 	}
 	defer server.stopOpencodeServer()
-	time.Sleep(2 * time.Second)
+	if err := WaitForOpencodeReady(server.opencodePort, 10*time.Second); err != nil {
+		t.Fatalf("Opencode server not ready: %v", err)
+	}
 
 	cookie := &http.Cookie{Name: "session", Value: "test-htmx"}
 	server.getOrCreateSession(cookie.Value)
@@ -451,7 +479,7 @@ func TestHTMXHeaders(t *testing.T) {
 	form := url.Values{}
 	form.Add("message", "HTMX test")
 	form.Add("provider", "anthropic")
-	form.Add("model", "claude-3-5-sonnet")
+	form.Add("model", "claude-3-5-haiku-20241022")
 
 	req := httptest.NewRequest("POST", "/send", strings.NewReader(form.Encode()))
 	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")

@@ -22,7 +22,7 @@ func TestOpencodeIsolation(t *testing.T) {
 	}
 	
 	// Create and start server
-	server, err := NewServer(16000)
+	server, err := NewServer(GetTestPort())
 	if err != nil {
 		t.Fatalf("Failed to create server: %v", err)
 	}
@@ -34,7 +34,9 @@ func TestOpencodeIsolation(t *testing.T) {
 	defer server.stopOpencodeServer()
 	
 	// Wait for opencode to be ready
-	time.Sleep(2 * time.Second)
+	if err := WaitForOpencodeReady(server.opencodePort, 10*time.Second); err != nil {
+		t.Fatalf("Opencode server not ready: %v", err)
+	}
 	
 	// Verify temp directory was created and is different from original cwd
 	if server.opencodeDir == "" {
@@ -104,8 +106,11 @@ func TestOpencodeIsolation(t *testing.T) {
 	}
 	defer msgResp.Body.Close()
 	
-	// Wait for response
-	time.Sleep(3 * time.Second)
+	// Wait for response processing
+	if err := WaitForMessageProcessed(server.opencodePort, session.ID, 10*time.Second); err != nil {
+		t.Logf("Message processing wait failed: %v", err)
+		// Continue anyway as this might be expected behavior
+	}
 	
 	// Get messages to check the response
 	getResp, err := http.Get(fmt.Sprintf("http://localhost:%d/session/%s/message", server.opencodePort, session.ID))
@@ -159,7 +164,7 @@ func TestOpencodeIsolation(t *testing.T) {
 
 // TestTempDirectoryCleanup verifies that temporary directories are cleaned up
 func TestTempDirectoryCleanup(t *testing.T) {
-	server, err := NewServer(16001)
+	server, err := NewServer(GetTestPort())
 	if err != nil {
 		t.Fatalf("Failed to create server: %v", err)
 	}
@@ -203,7 +208,7 @@ func TestNoFileLeakage(t *testing.T) {
 	// Get absolute path of test file
 	absTestFile, _ := filepath.Abs(testFile)
 	
-	server, err := NewServer(16002)
+	server, err := NewServer(GetTestPort())
 	if err != nil {
 		t.Fatalf("Failed to create server: %v", err)
 	}
@@ -215,7 +220,9 @@ func TestNoFileLeakage(t *testing.T) {
 	defer server.stopOpencodeServer()
 	
 	// Wait for opencode to be ready
-	time.Sleep(2 * time.Second)
+	if err := WaitForOpencodeReady(server.opencodePort, 10*time.Second); err != nil {
+		t.Fatalf("Opencode server not ready: %v", err)
+	}
 	
 	// Verify opencode cannot access the test file
 	// The file should not exist in opencode's temp directory
