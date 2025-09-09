@@ -1,0 +1,10 @@
+{{define "message"}}
+<div class="message message-{{.Alignment}}"{{if .ID}} id="{{.ID}}"{{end}}{{if .HXSwapOOB}} hx-swap-oob="outerHTML:#{{.ID}}"{{end}}>
+    <div class="message-bubble">
+        {{.Text}}
+        {{if and .Provider .Model}}
+        <div class="message-meta">{{.Provider}}/{{.Model}}</div>
+        {{end}}
+    </div>
+</div>
+{{end}}

@@ -1,0 +1,33 @@
+# Binaries
+opencode-chat
+opencode-chat.test
+*.test
+
+# Backup files
+*.bak
+*.backup
+
+# Runtime/temporary files
+cookies*.txt
+*.log
+
+# Go specific
+*.exe
+*.exe~
+*.dll
+*.so
+*.dylib
+vendor/
+dist/
+build/
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# OS
+.DS_Store
+Thumbs.db

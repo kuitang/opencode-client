@@ -1,0 +1,63 @@
+{{define "index"}}<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>OpenCode Chat</title>
+    <script src="https://unpkg.com/htmx.org@2.0.3"></script>
+    <script src="https://unpkg.com/htmx-ext-sse@2.2.2/sse.js"></script>
+    <link rel="stylesheet" href="/static/styles.css">
+    <script>
+        // Enable HTMX logging
+        htmx.logAll();
+        console.log("HTMX logging enabled");
+    </script>
+</head>
+<body>
+    <div class="header">
+        <h1>OpenCode Chat</h1>
+        <button hx-post="/clear" hx-target="#messages" hx-swap="innerHTML">Clear Session</button>
+    </div>
+    
+    <div class="chat-container" 
+         id="messages"
+         hx-ext="sse"
+         sse-connect="/events"
+         sse-swap="message"
+         hx-swap="beforeend">
+        {{.MessagesHTML}}
+    </div>
+    
+    <div class="input-container">
+        <form hx-post="/send" hx-target="#messages" hx-swap="beforeend" hx-on::after-request="this.reset()">
+            <div class="model-selector">
+                <label for="provider">Provider:</label>
+                <select id="provider" name="provider" 
+                        hx-get="/models" 
+                        hx-trigger="change" 
+                        hx-target="#model" 
+                        hx-swap="innerHTML">
+                    {{range .Providers}}
+                    <option value="{{.ID}}" {{if eq $.DefaultProvider .ID}}selected{{end}}>{{.Name}}</option>
+                    {{end}}
+                </select>
+                <label for="model">Model:</label>
+                <select id="model" name="model">
+                    {{range .DefaultModels}}
+                    <option value="{{.ID}}" {{if eq .ID $.DefaultModel}}selected{{end}}>{{.Name}}</option>
+                    {{end}}
+                </select>
+            </div>
+            <div class="input-row">
+                <input type="text" 
+                       id="message-input" 
+                       name="message" 
+                       placeholder="Type your message..." 
+                       required 
+                       autocomplete="off">
+                <button type="submit">Send</button>
+            </div>
+        </form>
+    </div>
+</body>
+</html>{{end}}
