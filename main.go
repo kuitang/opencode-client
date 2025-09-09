@@ -548,9 +548,15 @@ func (s *Server) handleSend(w http.ResponseWriter, r *http.Request) {
 
 	cookie, err := r.Cookie("session")
 	if err != nil {
-		log.Printf("handleSend: no session cookie - %v", err)
-		http.Error(w, "No session", http.StatusBadRequest)
-		return
+		// No cookie exists, create a new one
+		log.Printf("handleSend: no session cookie, creating new one")
+		cookie = &http.Cookie{
+			Name:     "session",
+			Value:    fmt.Sprintf("sess_%d", time.Now().UnixNano()),
+			HttpOnly: true,
+			Path:     "/",
+		}
+		http.SetCookie(w, cookie)
 	}
 
 	sessionID, err := s.getOrCreateSession(cookie.Value)
