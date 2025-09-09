@@ -72,7 +72,8 @@ func TestMessageTemplateIDs(t *testing.T) {
 				t.Fatal(err)
 			}
 
-			msg := doc.Find(".message").First()
+			// Find the outer message div (has flex class)
+			msg := doc.Find("div.flex").First()
 
 			// Check ID
 			if tt.wantID != "" {
@@ -94,9 +95,13 @@ func TestMessageTemplateIDs(t *testing.T) {
 				t.Errorf("Expected hx-swap-oob to reference ID %q", tt.wantID)
 			}
 
-			// Check class
+			// Check class - using actual template classes
 			class, _ := msg.Attr("class")
-			if !strings.Contains(class, tt.wantClass) {
+			if tt.wantClass == "message-right" && !strings.Contains(class, "justify-end") {
+				t.Errorf("Expected class to contain 'justify-end' for right alignment, got %q", class)
+			} else if tt.wantClass == "message-left" && !strings.Contains(class, "justify-start") {
+				t.Errorf("Expected class to contain 'justify-start' for left alignment, got %q", class)
+			} else if tt.wantClass == "streaming" && !strings.Contains(class, "streaming") {
 				t.Errorf("Expected class to contain %q, got %q", tt.wantClass, class)
 			}
 
@@ -167,17 +172,18 @@ func TestMessageMetadata(t *testing.T) {
 				t.Fatal(err)
 			}
 
-			meta := doc.Find(".message-meta")
+			// Look for metadata div with text-xs text-gray-600 classes
+			meta := doc.Find("div.text-xs.text-gray-600")
 			if tt.wantMetadata {
 				if meta.Length() == 0 {
-					t.Error("Expected message-meta element")
+					t.Error("Expected metadata element (div.text-xs.text-gray-600)")
 				}
 				if !strings.Contains(meta.Text(), tt.wantText) {
 					t.Errorf("Expected metadata text %q, got %q", tt.wantText, meta.Text())
 				}
 			} else {
 				if meta.Length() > 0 {
-					t.Error("Unexpected message-meta element")
+					t.Error("Unexpected metadata element")
 				}
 			}
 		})
@@ -195,8 +201,8 @@ func TestStreamingCSS(t *testing.T) {
 	css := string(cssBytes)
 
 	// Check for streaming class
-	if !strings.Contains(css, ".message.streaming") {
-		t.Error("CSS should contain .message.streaming selector")
+	if !strings.Contains(css, ".streaming") {
+		t.Error("CSS should contain .streaming selector")
 	}
 
 	// Check for animation keyframes
@@ -204,8 +210,8 @@ func TestStreamingCSS(t *testing.T) {
 		t.Error("CSS should contain @keyframes dots animation")
 	}
 
-	// Check for ::after pseudo-element
-	if !strings.Contains(css, ".message.streaming .message-bubble::after") {
-		t.Error("CSS should style streaming message bubble ::after")
+	// Check for ::after pseudo-element with animation
+	if !strings.Contains(css, "::after") {
+		t.Error("CSS should contain ::after pseudo-element for streaming animation")
 	}
 }

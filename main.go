@@ -21,6 +21,7 @@ import (
 	"syscall"
 	"time"
 
+	"github.com/microcosm-cc/bluemonday"
 	"github.com/russross/blackfriday/v2"
 )
 
@@ -90,8 +91,8 @@ type MessagePartData struct {
 func hasMarkdownPatterns(text string) bool {
 	patterns := []string{
 		`\*\*[^*]+\*\*`,     // **bold**
-		`\*[^*]+\*`,         // *italic*
-		`^#{1,6}\s`,         // # headers
+		`(^|\s)\*[^*\s][^*]*[^*\s]\*($|\s)`, // *italic* with word boundaries
+		`^#{1,6}\s`,         // # headers  
 		`^\d+\.\s`,          // 1. numbered lists
 		`^-\s`,              // - bullet points
 		"`[^`]+`",           // `code`
@@ -106,14 +107,38 @@ func hasMarkdownPatterns(text string) bool {
 	return false
 }
 
-// renderMarkdown converts markdown text to HTML
+// renderMarkdown converts markdown text to HTML with autolink and sanitizes it
 func renderMarkdown(text string) template.HTML {
-	if hasMarkdownPatterns(text) {
-		html := blackfriday.Run([]byte(text))
-		return template.HTML(html)
-	}
-	return template.HTML(text)
+	// Render markdown to HTML with autolink extension
+	// This will convert URLs to clickable links
+	html := blackfriday.Run([]byte(text), 
+		blackfriday.WithExtensions(
+			blackfriday.CommonExtensions | blackfriday.Autolink))
+	
+	// Sanitize HTML to prevent XSS
+	// UGCPolicy is designed for user-generated content
+	// It allows formatting tags but removes dangerous elements like <script>
+	policy := bluemonday.UGCPolicy()
+	safeHTML := policy.SanitizeBytes(html)
+	
+	return template.HTML(safeHTML)
 }
+
+// renderPlainText converts plain text to HTML with autolink and preserved line breaks
+func renderPlainText(text string) template.HTML {
+	// Process plain text with minimal markdown processing
+	// Only enable autolink and hard line breaks, no other markdown features
+	html := blackfriday.Run([]byte(text), 
+		blackfriday.WithExtensions(
+			blackfriday.Autolink | blackfriday.HardLineBreak | blackfriday.NoIntraEmphasis))
+	
+	// Sanitize HTML to prevent XSS
+	policy := bluemonday.UGCPolicy()
+	safeHTML := policy.SanitizeBytes(html)
+	
+	return template.HTML(safeHTML)
+}
+
 
 type MessageData struct {
 	ID          string
@@ -565,7 +590,15 @@ func (s *Server) handleSend(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Render user message using template with markdown support
+	// Render user message using appropriate renderer
+	isMarkdown := hasMarkdownPatterns(message)
+	var renderedHTML template.HTML
+	if isMarkdown {
+		renderedHTML = renderMarkdown(message)
+	} else {
+		renderedHTML = renderPlainText(message)
+	}
+	
 	msgData := MessageData{
 		Alignment: "right",
 		Text:      message,
@@ -573,9 +606,9 @@ func (s *Server) handleSend(w http.ResponseWriter, r *http.Request) {
 		Model:     model,
 		Parts: []MessagePartData{{
 			Type:         "text",
-			Content:      message,
-			IsMarkdown:   hasMarkdownPatterns(message),
-			RenderedHTML: renderMarkdown(message),
+			Content:      message,  // Keep original text
+			IsMarkdown:   isMarkdown,
+			RenderedHTML: renderedHTML,
 		}},
 	}
 
@@ -735,18 +768,27 @@ func (s *Server) handleSSE(w http.ResponseWriter, r *http.Request) {
 				case "text":
 					if text, ok := part["text"].(string); ok {
 						isMarkdown := hasMarkdownPatterns(text)
+						var renderedHTML template.HTML
+						if isMarkdown {
+							renderedHTML = renderMarkdown(text)
+						} else {
+							renderedHTML = renderPlainText(text)
+						}
+						
 						newPart = MessagePartData{
 							Type:         "text",
-							Content:      text,
+							Content:      text,  // Keep original text
 							IsMarkdown:   isMarkdown,
-							RenderedHTML: renderMarkdown(text),
+							RenderedHTML: renderedHTML,
 						}
 					}
 				case "reasoning":
 					if text, ok := part["text"].(string); ok {
+						reasoningText := fmt.Sprintf("🤔 Reasoning:\n%s", text)
 						newPart = MessagePartData{
-							Type:    "reasoning",
-							Content: fmt.Sprintf("🤔 Reasoning:\n%s", text),
+							Type:         "reasoning",
+							Content:      reasoningText,
+							RenderedHTML: renderPlainText(reasoningText),
 						}
 					}
 				case "tool":
@@ -772,9 +814,11 @@ func (s *Server) handleSSE(w http.ResponseWriter, r *http.Request) {
 							toolContent.WriteString("\nOutput:\n" + output)
 						}
 						
+						toolText := toolContent.String()
 						newPart = MessagePartData{
-							Type:    "tool",
-							Content: toolContent.String(),
+							Type:         "tool",
+							Content:      toolText,
+							RenderedHTML: renderPlainText(toolText),
 						}
 					}
 				case "file":
