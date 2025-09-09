@@ -45,10 +45,8 @@ func TestHasMarkdownPatterns(t *testing.T) {
 	
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			result := hasMarkdownPatterns(tt.input)
-			if result != tt.expected {
-				t.Errorf("hasMarkdownPatterns(%q) = %v, want %v", tt.input, result, tt.expected)
-			}
+			// Skip this test - hasMarkdownPatterns removed in unified renderer
+			_ = tt
 		})
 	}
 }
@@ -269,24 +267,25 @@ func TestRenderMarkdown(t *testing.T) {
 			name:     "Plain text fallback",
 			input:    "No markdown here",
 			contains: []string{"No markdown here"},
-			excludes: []string{"<p>", "<strong>", "<em>"},
+			excludes: []string{"<strong>", "<em>"},
+			// Note: <p> tags are now expected with unified renderer
 		},
 	}
 	
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			result := string(renderMarkdown(tt.input))
+			result := string(renderText(tt.input))
 			
 			for _, expected := range tt.contains {
 				if !strings.Contains(result, expected) {
-					t.Errorf("renderMarkdown(%q) missing expected content: %q\nGot: %q", 
+					t.Errorf("renderText(%q) missing expected content: %q\nGot: %q", 
 						tt.input, expected, result)
 				}
 			}
 			
 			for _, unexpected := range tt.excludes {
 				if strings.Contains(result, unexpected) {
-					t.Errorf("renderMarkdown(%q) contains unexpected content: %q\nGot: %q", 
+					t.Errorf("renderText(%q) contains unexpected content: %q\nGot: %q", 
 						tt.input, unexpected, result)
 				}
 			}
@@ -338,7 +337,7 @@ func TestMessagePartDataSecurity(t *testing.T) {
 			part := MessagePartData{
 				Type:       tt.partType,
 				Content:    tt.content,
-				IsMarkdown: tt.isMarkdown,
+				// IsMarkdown field removed in unified renderer
 			}
 			
 			// Verify Content field is unchanged (not pre-escaped)
@@ -349,7 +348,7 @@ func TestMessagePartDataSecurity(t *testing.T) {
 			
 			// For text type with markdown, verify RenderedHTML is set
 			if tt.partType == "text" && tt.isMarkdown {
-				part.RenderedHTML = renderMarkdown(tt.content)
+				part.RenderedHTML = renderText(tt.content)
 				if part.RenderedHTML == "" {
 					t.Error("RenderedHTML should be set for markdown text")
 				}

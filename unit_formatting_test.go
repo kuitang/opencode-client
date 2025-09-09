@@ -199,32 +199,18 @@ func TestMessageFormatting(t *testing.T) {
 	}
 
 	// Load the message template
-	tmpl := template.Must(template.New("test").Parse(`
-{{if .IsMarkdown}}
-{{.RenderedHTML}}
-{{else}}
-<div class="whitespace-pre-wrap">{{.Content}}</div>
-{{end}}
-`))
+	tmpl := template.Must(template.New("test").Parse(`{{.RenderedHTML}}`))
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			// Check markdown detection
-			detected := hasMarkdownPatterns(tt.input)
-			if detected != tt.expectMD {
-				t.Errorf("Markdown detection failed: got %v, want %v", detected, tt.expectMD)
-			}
-
 			// Create message part data
 			part := MessagePartData{
 				Type:       "text",
 				Content:    tt.input,
-				IsMarkdown: detected,
 			}
 
-			if detected {
-				part.RenderedHTML = renderMarkdown(tt.input)
-			}
+			// Always render with unified renderer
+			part.RenderedHTML = renderText(tt.input)
 
 			// Render through template
 			var buf strings.Builder
@@ -266,7 +252,7 @@ func TestUserAndLLMRenderingSame(t *testing.T) {
 	}
 
 	tmpl := template.Must(template.New("test").Parse(`
-{{if .IsMarkdown}}
+{{/* Always render with unified renderer */}}
 {{.RenderedHTML}}
 {{else}}
 <div class="whitespace-pre-wrap">{{.Content}}</div>
@@ -278,11 +264,10 @@ func TestUserAndLLMRenderingSame(t *testing.T) {
 		userPart := MessagePartData{
 			Type:       "text",
 			Content:    input,
-			IsMarkdown: hasMarkdownPatterns(input),
+			// IsMarkdown field removed
 		}
-		if userPart.IsMarkdown {
-			userPart.RenderedHTML = renderMarkdown(input)
-		}
+		// Always use unified renderer
+		userPart.RenderedHTML = renderText(input)
 
 		var userBuf strings.Builder
 		err := tmpl.Execute(&userBuf, userPart)
@@ -294,11 +279,10 @@ func TestUserAndLLMRenderingSame(t *testing.T) {
 		llmPart := MessagePartData{
 			Type:       "text",
 			Content:    input,
-			IsMarkdown: hasMarkdownPatterns(input),
+			// IsMarkdown field removed
 		}
-		if llmPart.IsMarkdown {
-			llmPart.RenderedHTML = renderMarkdown(input)
-		}
+		// Always use unified renderer
+		llmPart.RenderedHTML = renderText(input)
 
 		var llmBuf strings.Builder
 		err = tmpl.Execute(&llmBuf, llmPart)

@@ -1,12 +1,11 @@
 package main
 
 import (
-	"html/template"
 	"strings"
 	"testing"
 )
 
-func TestRenderMarkdownWithAutolink(t *testing.T) {
+func TestRenderTextWithAutolink(t *testing.T) {
 	tests := []struct {
 		name     string
 		input    string
@@ -70,7 +69,7 @@ func TestRenderMarkdownWithAutolink(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			result := string(renderMarkdown(tt.input))
+			result := string(renderText(tt.input))
 
 			for _, expected := range tt.contains {
 				if !strings.Contains(result, expected) {
@@ -87,7 +86,7 @@ func TestRenderMarkdownWithAutolink(t *testing.T) {
 	}
 }
 
-func TestRenderPlainTextWithAutolink(t *testing.T) {
+func TestRenderTextWithLineBreaksAndURLs(t *testing.T) {
 	tests := []struct {
 		name     string
 		input    string
@@ -95,11 +94,13 @@ func TestRenderPlainTextWithAutolink(t *testing.T) {
 		excludes []string
 	}{
 		{
-			name:  "URL with preserved newlines",
+			name:  "URL with preserved newlines (via CSS)",
 			input: "Line 1\nhttps://example.com\nLine 3",
 			contains: []string{
 				`<a href="https://example.com"`,
-				"<br", // HardLineBreak adds <br> tags
+				"Line 1",
+				"Line 3",
+				// Note: Line breaks preserved via CSS white-space: pre-line, not <br> tags
 			},
 		},
 		{
@@ -111,21 +112,20 @@ func TestRenderPlainTextWithAutolink(t *testing.T) {
 				"• Check",
 				`<a href="http://github.com"`,
 				"• Done",
-				"<br",
 			},
 		},
 		{
-			name:  "Multiple newlines preserved",
+			name:  "Multiple newlines",
 			input: "Paragraph 1\n\nParagraph 2 with https://link.com",
 			contains: []string{
 				"Paragraph 1",
 				"Paragraph 2",
 				`<a href="https://link.com"`,
-				// Note: double newlines create <p> tags, not <br>
+				// Double newlines create <p> tags in markdown
 			},
 		},
 		{
-			name:  "Plain text with minimal markdown",
+			name:  "Plain text with URL",
 			input: "Text with https://example.com link",
 			contains: []string{
 				"Text with",
@@ -133,7 +133,7 @@ func TestRenderPlainTextWithAutolink(t *testing.T) {
 			},
 		},
 		{
-			name:  "XSS prevention in plain text",
+			name:  "XSS prevention",
 			input: "<script>alert('XSS')</script>\nhttps://safe.com",
 			contains: []string{
 				`<a href="https://safe.com"`,
@@ -147,7 +147,7 @@ func TestRenderPlainTextWithAutolink(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			result := string(renderPlainText(tt.input))
+			result := string(renderText(tt.input))
 
 			for _, expected := range tt.contains {
 				if !strings.Contains(result, expected) {
@@ -164,33 +164,31 @@ func TestRenderPlainTextWithAutolink(t *testing.T) {
 	}
 }
 
-func TestMarkdownVsPlainTextLineBreaks(t *testing.T) {
+func TestUnifiedTextRendering(t *testing.T) {
 	input := "Line 1\nLine 2\nLine 3"
 
-	// Markdown should NOT preserve single line breaks
-	markdownResult := string(renderMarkdown(input))
-	if strings.Contains(markdownResult, "<br") {
-		t.Errorf("Markdown should not add <br> for single newlines\nGot: %q", markdownResult)
+	// Unified renderer doesn't add <br> tags
+	// Line breaks are preserved via CSS white-space: pre-line
+	result := string(renderText(input))
+	if strings.Contains(result, "<br") {
+		t.Errorf("Unified renderer should not add <br> tags\nGot: %q", result)
 	}
-
-	// Plain text SHOULD preserve line breaks
-	plainResult := string(renderPlainText(input))
-	if !strings.Contains(plainResult, "<br") {
-		t.Errorf("Plain text should add <br> for newlines\nGot: %q", plainResult)
+	
+	// Content should still be present
+	if !strings.Contains(result, "Line 1") || !strings.Contains(result, "Line 2") {
+		t.Errorf("Content should be preserved\nGot: %q", result)
 	}
 }
 
 func TestURLLinkingComposition(t *testing.T) {
 	tests := []struct {
-		name       string
-		input      string
-		isMarkdown bool
-		checkFunc  func(string) bool
+		name      string
+		input     string
+		checkFunc func(string) bool
 	}{
 		{
-			name:       "Markdown with URLs",
-			input:      "# Header\n\nVisit https://example.com for **bold** text",
-			isMarkdown: true,
+			name:  "Markdown with URLs",
+			input: "# Header\n\nVisit https://example.com for **bold** text",
 			checkFunc: func(result string) bool {
 				return strings.Contains(result, "<h1>") &&
 					strings.Contains(result, "<strong>") &&
@@ -198,25 +196,19 @@ func TestURLLinkingComposition(t *testing.T) {
 			},
 		},
 		{
-			name:       "Plain text with URLs",
-			input:      "• Item 1\n• Visit https://example.com\n• Item 3",
-			isMarkdown: false,
+			name:  "Plain text with URLs and line breaks (CSS preserved)",
+			input: "• Item 1\n• Visit https://example.com\n• Item 3",
 			checkFunc: func(result string) bool {
 				return strings.Contains(result, "• Item 1") &&
 					strings.Contains(result, `<a href="https://example.com"`) &&
-					strings.Contains(result, "<br")
+					strings.Contains(result, "• Item 3")
 			},
 		},
 	}
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			var result template.HTML
-			if tt.isMarkdown {
-				result = renderMarkdown(tt.input)
-			} else {
-				result = renderPlainText(tt.input)
-			}
+			result := renderText(tt.input)
 
 			if !tt.checkFunc(string(result)) {
 				t.Errorf("Composition test failed for %s\nGot: %q", tt.name, result)

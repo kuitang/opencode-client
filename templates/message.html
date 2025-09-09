@@ -9,11 +9,11 @@
                     </div>
                 {{else if eq .Type "reasoning"}}
                     <div class="my-2 first:mt-0 last:mb-0">
-                        <pre class="overflow-x-auto">{{.RenderedHTML}}</pre>
+                        <pre class="overflow-x-auto">{{.Content}}</pre>
                     </div>
                 {{else if eq .Type "tool"}}
                     <div class="my-2 first:mt-0 last:mb-0">
-                        <pre class="overflow-x-auto">{{.RenderedHTML}}</pre>
+                        <pre class="overflow-x-auto">{{.Content}}</pre>
                     </div>
                 {{else if eq .Type "file"}}
                     <div class="my-2 first:mt-0 last:mb-0">{{.Content}}</div>

@@ -122,7 +122,7 @@ func TestSendMessage(t *testing.T) {
 
 	// Check response contains message bubble
 	body := w.Body.String()
-	if !strings.Contains(body, "message-right") {
+	if !strings.Contains(body, "justify-end") {
 		t.Error("Response should contain right-aligned message bubble")
 	}
 	if !strings.Contains(body, "Hello") {

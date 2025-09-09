@@ -15,7 +15,6 @@ import (
 	"os/exec"
 	"os/signal"
 	"path/filepath"
-	"regexp"
 	"strings"
 	"sync"
 	"syscall"
@@ -79,38 +78,48 @@ type MessageResponse struct {
 	Parts []MessagePart `json:"parts"`
 }
 
+// LoggingResponseWriter wraps http.ResponseWriter to log all responses
+type LoggingResponseWriter struct {
+	http.ResponseWriter
+	statusCode int
+	body       *bytes.Buffer
+}
+
+func NewLoggingResponseWriter(w http.ResponseWriter) *LoggingResponseWriter {
+	return &LoggingResponseWriter{
+		ResponseWriter: w,
+		statusCode:     200,
+		body:          &bytes.Buffer{},
+	}
+}
+
+func (lw *LoggingResponseWriter) WriteHeader(code int) {
+	lw.statusCode = code
+	lw.ResponseWriter.WriteHeader(code)
+}
+
+func (lw *LoggingResponseWriter) Write(data []byte) (int, error) {
+	lw.body.Write(data)
+	return lw.ResponseWriter.Write(data)
+}
+
+func (lw *LoggingResponseWriter) LogResponse(method, path string) {
+	bodyStr := lw.body.String()
+	log.Printf("WIRE_OUT %s %s [%d]: %s", method, path, lw.statusCode, bodyStr)
+}
+
 type MessagePartData struct {
 	Type        string
 	Content     string
-	IsMarkdown  bool
-	RenderedHTML template.HTML
+	RenderedHTML template.HTML  // Used for text parts only
 	PartID      string // To identify updates to same part
 }
 
-// hasMarkdownPatterns checks if text contains common markdown patterns
-func hasMarkdownPatterns(text string) bool {
-	patterns := []string{
-		`\*\*[^*]+\*\*`,     // **bold**
-		`(^|\s)\*[^*\s][^*]*[^*\s]\*($|\s)`, // *italic* with word boundaries
-		`^#{1,6}\s`,         // # headers  
-		`^\d+\.\s`,          // 1. numbered lists
-		`^-\s`,              // - bullet points
-		"`[^`]+`",           // `code`
-		`\[.+\]\(.+\)`,      // [link](url)
-	}
-	
-	for _, pattern := range patterns {
-		if matched, _ := regexp.MatchString(pattern, text); matched {
-			return true
-		}
-	}
-	return false
-}
-
-// renderMarkdown converts markdown text to HTML with autolink and sanitizes it
-func renderMarkdown(text string) template.HTML {
-	// Render markdown to HTML with autolink extension
-	// This will convert URLs to clickable links
+// renderText converts text to HTML with markdown support and autolink, then sanitizes it
+// Used for all text content (user input and LLM output) except tool/reasoning blocks
+func renderText(text string) template.HTML {
+	// Render with markdown and autolink extensions
+	// This works for both markdown AND plain text
 	html := blackfriday.Run([]byte(text), 
 		blackfriday.WithExtensions(
 			blackfriday.CommonExtensions | blackfriday.Autolink))
@@ -118,21 +127,6 @@ func renderMarkdown(text string) template.HTML {
 	// Sanitize HTML to prevent XSS
 	// UGCPolicy is designed for user-generated content
 	// It allows formatting tags but removes dangerous elements like <script>
-	policy := bluemonday.UGCPolicy()
-	safeHTML := policy.SanitizeBytes(html)
-	
-	return template.HTML(safeHTML)
-}
-
-// renderPlainText converts plain text to HTML with autolink and preserved line breaks
-func renderPlainText(text string) template.HTML {
-	// Process plain text with minimal markdown processing
-	// Only enable autolink and hard line breaks, no other markdown features
-	html := blackfriday.Run([]byte(text), 
-		blackfriday.WithExtensions(
-			blackfriday.Autolink | blackfriday.HardLineBreak | blackfriday.NoIntraEmphasis))
-	
-	// Sanitize HTML to prevent XSS
 	policy := bluemonday.UGCPolicy()
 	safeHTML := policy.SanitizeBytes(html)
 	
@@ -215,13 +209,30 @@ func main() {
 	}
 	log.Printf("Loaded %d providers", len(server.providers))
 
-	// Set up routes
-	http.HandleFunc("/", server.handleIndex)
-	http.HandleFunc("/send", server.handleSend)
-	http.HandleFunc("/events", server.handleSSE)
-	http.HandleFunc("/clear", server.handleClear)
-	http.HandleFunc("/messages", server.handleMessages)
-	http.HandleFunc("/models", server.handleModels)
+	// Logging middleware
+	loggingMiddleware := func(handler http.HandlerFunc) http.HandlerFunc {
+		return func(w http.ResponseWriter, r *http.Request) {
+			// Special handling for SSE endpoint - don't buffer the entire stream
+			if r.URL.Path == "/events" {
+				log.Printf("WIRE_OUT SSE connection started: %s %s", r.Method, r.URL.Path)
+				handler(w, r)
+				log.Printf("WIRE_OUT SSE connection ended: %s %s", r.Method, r.URL.Path)
+				return
+			}
+			
+			lw := NewLoggingResponseWriter(w)
+			handler(lw, r)
+			lw.LogResponse(r.Method, r.URL.Path)
+		}
+	}
+
+	// Set up routes with logging
+	http.HandleFunc("/", loggingMiddleware(server.handleIndex))
+	http.HandleFunc("/send", loggingMiddleware(server.handleSend))
+	http.HandleFunc("/events", loggingMiddleware(server.handleSSE))
+	http.HandleFunc("/clear", loggingMiddleware(server.handleClear))
+	http.HandleFunc("/messages", loggingMiddleware(server.handleMessages))
+	http.HandleFunc("/models", loggingMiddleware(server.handleModels))
 	http.Handle("/static/", http.FileServer(http.FS(staticFS)))
 
 	// Set up signal handling for graceful shutdown
@@ -590,14 +601,8 @@ func (s *Server) handleSend(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Render user message using appropriate renderer
-	isMarkdown := hasMarkdownPatterns(message)
-	var renderedHTML template.HTML
-	if isMarkdown {
-		renderedHTML = renderMarkdown(message)
-	} else {
-		renderedHTML = renderPlainText(message)
-	}
+	// Render user message with unified renderer
+	renderedHTML := renderText(message)
 	
 	msgData := MessageData{
 		Alignment: "right",
@@ -607,7 +612,6 @@ func (s *Server) handleSend(w http.ResponseWriter, r *http.Request) {
 		Parts: []MessagePartData{{
 			Type:         "text",
 			Content:      message,  // Keep original text
-			IsMarkdown:   isMarkdown,
 			RenderedHTML: renderedHTML,
 		}},
 	}
@@ -767,18 +771,12 @@ func (s *Server) handleSSE(w http.ResponseWriter, r *http.Request) {
 				switch part["type"] {
 				case "text":
 					if text, ok := part["text"].(string); ok {
-						isMarkdown := hasMarkdownPatterns(text)
-						var renderedHTML template.HTML
-						if isMarkdown {
-							renderedHTML = renderMarkdown(text)
-						} else {
-							renderedHTML = renderPlainText(text)
-						}
+						// Render with unified renderer
+						renderedHTML := renderText(text)
 						
 						newPart = MessagePartData{
 							Type:         "text",
 							Content:      text,  // Keep original text
-							IsMarkdown:   isMarkdown,
 							RenderedHTML: renderedHTML,
 						}
 					}
@@ -786,9 +784,9 @@ func (s *Server) handleSSE(w http.ResponseWriter, r *http.Request) {
 					if text, ok := part["text"].(string); ok {
 						reasoningText := fmt.Sprintf("🤔 Reasoning:\n%s", text)
 						newPart = MessagePartData{
-							Type:         "reasoning",
-							Content:      reasoningText,
-							RenderedHTML: renderPlainText(reasoningText),
+							Type:    "reasoning",
+							Content: reasoningText,
+							// No RenderedHTML - will use .Content in <pre> tag
 						}
 					}
 				case "tool":
@@ -816,9 +814,9 @@ func (s *Server) handleSSE(w http.ResponseWriter, r *http.Request) {
 						
 						toolText := toolContent.String()
 						newPart = MessagePartData{
-							Type:         "tool",
-							Content:      toolText,
-							RenderedHTML: renderPlainText(toolText),
+							Type:    "tool",
+							Content: toolText,
+							// No RenderedHTML - will use .Content in <pre> tag
 						}
 					}
 				case "file":
@@ -899,6 +897,9 @@ func (s *Server) handleSSE(w http.ResponseWriter, r *http.Request) {
 					}
 					fmt.Fprintf(w, "\n") // Empty line to end the event
 					flusher.Flush()
+					
+					// Log the SSE message sent to client
+					log.Printf("WIRE_OUT SSE [msgID=%s]: %s", msgID, html)
 					
 					// Mark that we've sent the first event for this message
 					if !messageFirstSent[msgID] {
