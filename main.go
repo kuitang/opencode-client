@@ -256,6 +256,15 @@ func (s *Server) getOrCreateSession(cookie string) (string, error) {
 	return session.ID, nil
 }
 
+// renderMessage renders a message using the template
+func (s *Server) renderMessage(msg MessageData) (string, error) {
+	var buf bytes.Buffer
+	if err := s.templates.ExecuteTemplate(&buf, "message", msg); err != nil {
+		return "", err
+	}
+	return buf.String(), nil
+}
+
 func (s *Server) handleIndex(w http.ResponseWriter, r *http.Request) {
 	cookie, err := r.Cookie("session")
 	if err != nil {
@@ -466,9 +475,9 @@ func (s *Server) handleSSE(w http.ResponseWriter, r *http.Request) {
 
 	// Use bufio.Scanner - the idiomatic way to read SSE streams
 	scanner := bufio.NewScanner(resp.Body)
-	messageParts := make(map[string][]MessagePartData) // [messageID] = ordered slice of parts
-	messageFirstSent := make(map[string]bool)          // Track if first event sent for each message
-	messageRoles := make(map[string]string)            // Track message roles
+	partsManager := NewMessagePartsManager()
+	messageFirstSent := make(map[string]bool) // Track if first event sent for each message
+	messageRoles := make(map[string]string)   // Track message roles
 
 	log.Printf("Starting to read SSE stream from OpenCode")
 	for scanner.Scan() {
@@ -504,175 +513,148 @@ func (s *Server) handleSSE(w http.ResponseWriter, r *http.Request) {
 
 			// Only process message.part.updated events for our session
 			if event["type"] == "message.part.updated" {
-				if props, ok := event["properties"].(map[string]interface{}); ok {
-					if part, ok := props["part"].(map[string]interface{}); ok {
-						// Check if this is for our session FIRST
-						if part["sessionID"] != sessionID {
-							continue
-						}
+				// Validate and extract message part data
+				msgID, partID, part, err := ValidateAndExtractMessagePart(event, sessionID)
+				if err != nil {
+					// Skip invalid events (includes wrong session, missing IDs, etc.)
+					continue
+				}
+				
+				// Skip user messages - we only want to stream assistant messages
+				if role, exists := messageRoles[msgID]; exists && role == "user" {
+					continue
+				}
 
-						// Get the message ID and part ID
-						msgID, _ := part["messageID"].(string)
-						partID, _ := part["id"].(string)
+				var newPart MessagePartData
+				// Update the specific part
+				switch part["type"] {
+				case "text":
+					if text, ok := part["text"].(string); ok {
+						isMarkdown := hasMarkdownPatterns(text)
+						newPart = MessagePartData{
+							Type:         "text",
+							Content:      text,
+							IsMarkdown:   isMarkdown,
+							RenderedHTML: renderMarkdown(text),
+						}
+					}
+				case "reasoning":
+					if text, ok := part["text"].(string); ok {
+						newPart = MessagePartData{
+							Type:    "reasoning",
+							Content: fmt.Sprintf("🤔 Reasoning:\n%s", text),
+						}
+					}
+				case "tool":
+					// Store tool information for rendering
+					toolName, _ := part["tool"].(string)
+					if state, ok := part["state"].(map[string]interface{}); ok {
+						status, _ := state["status"].(string)
 						
-						// Skip user messages - we only want to stream assistant messages
-						if role, exists := messageRoles[msgID]; exists && role == "user" {
-							continue
-						}
-
-						// Find existing part or append new one
-						var partIndex = -1
-						for i, existingPart := range messageParts[msgID] {
-							if existingPart.PartID == partID {
-								partIndex = i
-								break
-							}
-						}
-
-						var newPart MessagePartData
-						// Update the specific part
-						switch part["type"] {
-						case "text":
-							if text, ok := part["text"].(string); ok {
-								isMarkdown := hasMarkdownPatterns(text)
-								newPart = MessagePartData{
-									Type:         "text",
-									Content:      text,
-									IsMarkdown:   isMarkdown,
-									RenderedHTML: renderMarkdown(text),
-									PartID:       partID,
-								}
-							}
-						case "reasoning":
-							if text, ok := part["text"].(string); ok {
-								newPart = MessagePartData{
-									Type:    "reasoning",
-									Content: fmt.Sprintf("🤔 Reasoning:\n%s", text),
-									PartID:  partID,
-								}
-							}
-						case "tool":
-							// Store tool information for rendering
-							toolName, _ := part["tool"].(string)
-							if state, ok := part["state"].(map[string]interface{}); ok {
-								status, _ := state["status"].(string)
-								
-								// Start with tool header
-								var toolContent strings.Builder
-								toolContent.WriteString(fmt.Sprintf("Tool: %s (Status: %s)", toolName, status))
-								
-								// Add tool input if available
-								if input, ok := state["input"].(map[string]interface{}); ok {
-									toolContent.WriteString("\nInput: ")
-									for key, value := range input {
-										toolContent.WriteString(fmt.Sprintf("%s=%v ", key, value))
-									}
-								}
-								
-								// Add tool output if available
-								if output, ok := state["output"].(string); ok && output != "" {
-									toolContent.WriteString("\nOutput:\n" + output)
-								}
-								
-								newPart = MessagePartData{
-									Type:    "tool",
-									Content: toolContent.String(),
-									PartID:  partID,
-								}
-							}
-						case "file":
-							filename, _ := part["filename"].(string)
-							url, _ := part["url"].(string)
-							newPart = MessagePartData{
-								Type:    "file",
-								Content: fmt.Sprintf("📁 File: %s\nURL: %s", filename, url),
-								PartID:  partID,
-							}
-						case "snapshot":
-							newPart = MessagePartData{
-								Type:    "snapshot",
-								Content: "📸 Snapshot taken",
-								PartID:  partID,
-							}
-						case "patch":
-							newPart = MessagePartData{
-								Type:    "patch", 
-								Content: "🔧 Code patch applied",
-								PartID:  partID,
-							}
-						case "agent":
-							newPart = MessagePartData{
-								Type:    "agent",
-								Content: "🤖 Agent action",
-								PartID:  partID,
-							}
-						case "step-start":
-							newPart = MessagePartData{
-								Type:    "step-start",
-								Content: "▶️ Step started",
-								PartID:  partID,
-							}
-						case "step-finish":
-							// Mark message as complete
-							newPart = MessagePartData{
-								Type:    "step-finish",
-								Content: "✅ Step completed",
-								PartID:  partID,
-							}
-						}
-
-						// Update or append the part
-						if partIndex >= 0 {
-							// Update existing part
-							messageParts[msgID][partIndex] = newPart
-						} else if newPart.PartID != "" {
-							// Append new part
-							messageParts[msgID] = append(messageParts[msgID], newPart)
-						}
-
-						// Build complete message from all parts
-						completeParts := messageParts[msgID] // Use the slice directly - it's already ordered
-						var completeText strings.Builder
-						isStreaming := true
+						// Start with tool header
+						var toolContent strings.Builder
+						toolContent.WriteString(fmt.Sprintf("Tool: %s (Status: %s)", toolName, status))
 						
-						for _, msgPart := range completeParts {
-							if msgPart.Type == "text" {
-								completeText.WriteString(msgPart.Content)
-							} else if msgPart.Type == "tool" {
-								completeText.WriteString("\n\n" + msgPart.Content)
-							} else if msgPart.Type == "step-finish" {
-								isStreaming = false
+						// Add tool input if available
+						if input, ok := state["input"].(map[string]interface{}); ok {
+							toolContent.WriteString("\nInput: ")
+							for key, value := range input {
+								toolContent.WriteString(fmt.Sprintf("%s=%v ", key, value))
 							}
 						}
-
-						// Send SSE event to browser with complete message
-						msgData := MessageData{
-							ID:          fmt.Sprintf("assistant-%s", msgID),
-							Alignment:   "left",
-							Text:        completeText.String(),
-							Parts:       completeParts,
-							IsStreaming: isStreaming,
-							HXSwapOOB:   messageFirstSent[msgID], // Use OOB for updates after first send
+						
+						// Add tool output if available
+						if output, ok := state["output"].(string); ok && output != "" {
+							toolContent.WriteString("\nOutput:\n" + output)
 						}
-
-						var buf bytes.Buffer
-						if err := s.templates.ExecuteTemplate(&buf, "message", msgData); err == nil {
-							html := strings.TrimSpace(buf.String())
-
-							// Send multi-line HTML using multiple data: lines (SSE standard)
-							fmt.Fprintf(w, "event: message\n")
-							lines := strings.Split(html, "\n")
-							for _, line := range lines {
-								fmt.Fprintf(w, "data: %s\n", line)
-							}
-							fmt.Fprintf(w, "\n") // Empty line to end the event
-							flusher.Flush()
-							
-							// Mark that we've sent the first event for this message
-							if !messageFirstSent[msgID] {
-								messageFirstSent[msgID] = true
-							}
+						
+						newPart = MessagePartData{
+							Type:    "tool",
+							Content: toolContent.String(),
 						}
+					}
+				case "file":
+					filename, _ := part["filename"].(string)
+					url, _ := part["url"].(string)
+					newPart = MessagePartData{
+						Type:    "file",
+						Content: fmt.Sprintf("📁 File: %s\nURL: %s", filename, url),
+					}
+				case "snapshot":
+					newPart = MessagePartData{
+						Type:    "snapshot",
+						Content: "📸 Snapshot taken",
+					}
+				case "patch":
+					newPart = MessagePartData{
+						Type:    "patch", 
+						Content: "🔧 Code patch applied",
+					}
+				case "agent":
+					newPart = MessagePartData{
+						Type:    "agent",
+						Content: "🤖 Agent action",
+					}
+				case "step-start":
+					newPart = MessagePartData{
+						Type:    "step-start",
+						Content: "▶️ Step started",
+					}
+				case "step-finish":
+					// Mark message as complete
+					newPart = MessagePartData{
+						Type:    "step-finish",
+						Content: "✅ Step completed",
+					}
+				}
+
+				// Update the part in the manager
+				if err := partsManager.UpdatePart(msgID, partID, newPart); err != nil {
+					log.Printf("Failed to update part: %v", err)
+					continue
+				}
+
+				// Build complete message from all parts
+				completeParts := partsManager.GetParts(msgID)
+				var completeText strings.Builder
+				isStreaming := true
+				
+				for _, msgPart := range completeParts {
+					if msgPart.Type == "text" {
+						completeText.WriteString(msgPart.Content)
+					} else if msgPart.Type == "tool" {
+						completeText.WriteString("\n\n" + msgPart.Content)
+					} else if msgPart.Type == "step-finish" {
+						isStreaming = false
+					}
+				}
+
+				// Send SSE event to browser with complete message
+				msgData := MessageData{
+					ID:          fmt.Sprintf("assistant-%s", msgID),
+					Alignment:   "left",
+					Text:        completeText.String(),
+					Parts:       completeParts,
+					IsStreaming: isStreaming,
+					HXSwapOOB:   messageFirstSent[msgID], // Use OOB for updates after first send
+				}
+
+				html, err := s.renderMessage(msgData)
+				if err == nil {
+					html = strings.TrimSpace(html)
+					
+					// Send multi-line HTML using multiple data: lines (SSE standard)
+					fmt.Fprintf(w, "event: message\n")
+					lines := strings.Split(html, "\n")
+					for _, line := range lines {
+						fmt.Fprintf(w, "data: %s\n", line)
+					}
+					fmt.Fprintf(w, "\n") // Empty line to end the event
+					flusher.Flush()
+					
+					// Mark that we've sent the first event for this message
+					if !messageFirstSent[msgID] {
+						messageFirstSent[msgID] = true
 					}
 				}
 			}
@@ -760,9 +742,8 @@ func (s *Server) getMessagesHTML(sessionID string) string {
 			Model:     msg.Info.ModelID,
 		}
 
-		var buf bytes.Buffer
-		if err := s.templates.ExecuteTemplate(&buf, "message", msgData); err == nil {
-			html.WriteString(buf.String())
+		if msgHTML, err := s.renderMessage(msgData); err == nil {
+			html.WriteString(msgHTML)
 		}
 	}
 
