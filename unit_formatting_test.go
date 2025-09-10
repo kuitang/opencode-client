@@ -17,7 +17,7 @@ func TestMessageFormatting(t *testing.T) {
 	tests := []struct {
 		name         string
 		input        string
-		expectMD     bool // expect markdown detection
+		expectMD     bool     // expect markdown detection
 		hasElements  []string // HTML elements that should exist
 		hasClasses   []string // CSS classes that should exist
 		containsText []string // Text content that should be preserved
@@ -216,7 +216,7 @@ func TestUserAndLLMRenderingSame(t *testing.T) {
 			}},
 		}
 
-		// Create LLM message 
+		// Create LLM message
 		llmMsg := MessageData{
 			Alignment: "left",
 			Parts: []MessagePartData{{

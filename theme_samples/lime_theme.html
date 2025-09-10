@@ -1,0 +1,182 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>OpenCode Chat - Lime Theme</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script>
+        tailwind.config = {
+            darkMode: 'class'
+        }
+    </script>
+    <style>
+        .streaming::after {
+            content: '...';
+            display: inline-block;
+            animation: dots 1.5s steps(4) infinite;
+            width: 20px;
+            text-align: left;
+        }
+        @keyframes dots {
+            0%, 20% { content: '.'; }
+            40% { content: '..'; }
+            60%, 100% { content: '...'; }
+        }
+    </style>
+</head>
+<body class="h-screen flex flex-col bg-white">
+    <!-- Header -->
+    <div class="bg-lime-600 dark:bg-lime-800 text-white px-4 py-6 flex justify-between items-center">
+        <h1 class="text-xl font-semibold">OpenCode Chat - Lime</h1>
+        <div class="flex items-center gap-3">
+            <button onclick="toggleDark()" class="px-3 py-2 bg-lime-500 hover:bg-lime-400 dark:bg-lime-700 dark:hover:bg-lime-600 text-white rounded transition-colors text-sm">
+                🌙 Dark
+            </button>
+            <button class="px-4 py-2 bg-lime-500 hover:bg-lime-400 dark:bg-lime-700 dark:hover:bg-lime-600 text-white rounded transition-colors">Clear Session</button>
+        </div>
+    </div>
+    
+    <!-- Messages -->
+    <div class="flex-1 overflow-y-auto p-4 space-y-4 bg-white dark:bg-gray-900">
+        <!-- User Message -->
+        <div class="flex justify-end">
+            <div class="max-w-[70%] p-4 rounded-lg break-words bg-lime-50 dark:bg-lime-900 border-l-4 border-lime-500 dark:border-lime-400 shadow-sm">
+                <div class="text-base text-lime-900 dark:text-lime-100">
+                    What are the best practices for API design?
+                </div>
+                <div class="text-xs text-lime-600 dark:text-lime-300 mt-1">anthropic/claude-3-5-sonnet</div>
+            </div>
+        </div>
+
+        <!-- Assistant Message -->
+        <div class="flex justify-start">
+            <div class="max-w-[70%] p-4 rounded-lg break-words bg-white dark:bg-gray-800 border-l-4 border-green-500 dark:border-green-400 shadow-sm">
+                <div class="text-base text-gray-900 dark:text-gray-100">
+                    Great question! Here are the key API design best practices:
+
+                    <h3 class="font-semibold mt-4 mb-2 text-green-700 dark:text-green-300">1. RESTful Design Principles</h3>
+                    <p class="mb-2 text-gray-700 dark:text-gray-300">Use standard HTTP methods and meaningful resource URLs:</p>
+                </div>
+                <div class="text-xs text-green-600 dark:text-green-400 mt-1">anthropic/claude-3-5-sonnet</div>
+            </div>
+        </div>
+
+        <!-- Tool Message -->
+        <div class="flex justify-start">
+            <div class="max-w-[70%] p-4 rounded-lg break-words bg-gray-800 dark:bg-gray-950 text-white border-l-4 border-amber-500 dark:border-amber-400 shadow-sm">
+                <details class="border border-gray-600 dark:border-gray-700 rounded-lg">
+                    <summary class="px-3 py-2 bg-gray-700 dark:bg-gray-800 hover:bg-gray-600 dark:hover:bg-gray-700 cursor-pointer rounded-t-lg">
+                        <span class="inline-flex items-center gap-2">
+                            <span>📄</span>
+                            <span class="font-medium">write</span>
+                            <span class="text-gray-300 dark:text-gray-200">api-routes.js</span>
+                        </span>
+                        <span class="ml-auto text-xs text-gray-400 dark:text-gray-300">success</span>
+                    </summary>
+                    <div class="p-3 border-t border-gray-600 dark:border-gray-700">
+                        <pre class="bg-gray-900 dark:bg-black text-gray-100 dark:text-gray-50 p-3 rounded overflow-x-auto text-sm">// RESTful API endpoints
+app.get('/api/users', getAllUsers);         // GET collection
+app.get('/api/users/:id', getUserById);     // GET specific resource
+app.post('/api/users', createUser);         // CREATE new resource
+app.put('/api/users/:id', updateUser);      // UPDATE entire resource
+app.patch('/api/users/:id', patchUser);     // UPDATE partial resource
+app.delete('/api/users/:id', deleteUser);   // DELETE resource
+
+// Consistent response format
+{
+  "data": { /* actual data */ },
+  "meta": { "total": 42, "page": 1 },
+  "errors": []
+}</pre>
+                    </div>
+                </details>
+                <div class="text-xs text-amber-400 dark:text-amber-300 mt-1">anthropic/claude-3-5-sonnet</div>
+            </div>
+        </div>
+
+        <!-- Todo List -->
+        <div class="flex justify-start">
+            <div class="max-w-[70%] p-4 rounded-lg break-words bg-green-50 dark:bg-green-900 border border-green-200 dark:border-green-700 shadow-sm">
+                <div class="flex items-center gap-2 mb-2">
+                    <span>✅</span>
+                    <span class="font-medium text-green-900 dark:text-green-100">Todo List Updated</span>
+                </div>
+                <div class="space-y-1 text-sm">
+                    <div class="flex items-start gap-2">
+                        <span class="text-green-600 dark:text-green-400">✓</span>
+                        <span class="text-xs text-gray-400">1.</span>
+                        <span class="line-through text-gray-500 dark:text-gray-400">Define RESTful endpoint structure</span>
+                    </div>
+                    <div class="flex items-start gap-2">
+                        <span class="text-blue-600 dark:text-blue-400">⏳</span>
+                        <span class="text-xs text-gray-400">2.</span>
+                        <span class="text-blue-800 dark:text-blue-200">Implement consistent response format</span>
+                    </div>
+                    <div class="flex items-start gap-2">
+                        <span class="text-gray-500 dark:text-gray-400">☐</span>
+                        <span class="text-xs text-gray-400">3.</span>
+                        <span class="text-gray-800 dark:text-gray-200">Add proper error handling</span>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <!-- Streaming Message -->
+        <div class="flex justify-start">
+            <div class="max-w-[70%] p-4 rounded-lg break-words bg-white dark:bg-gray-800 border-l-4 border-green-500 dark:border-green-400 shadow-sm streaming">
+                <div class="text-base text-gray-900 dark:text-gray-100">
+                    Now let's discuss API versioning strategies
+                </div>
+            </div>
+        </div>
+    </div>
+    
+    <!-- Form -->
+    <div class="bg-lime-50 dark:bg-gray-800 border-t border-lime-200 dark:border-gray-700 p-4">
+        <form class="space-y-3">
+            <div class="flex gap-4 items-end">
+                <textarea placeholder="Type your message... (Shift+Enter for new line)" 
+                          rows="1"
+                          class="flex-1 px-3 py-2 border border-lime-300 dark:border-gray-600 rounded focus:outline-none focus:ring-2 focus:ring-lime-400 dark:focus:ring-lime-500 resize-none bg-white dark:bg-gray-700 text-gray-900 dark:text-gray-100 placeholder-gray-500 dark:placeholder-gray-400"></textarea>
+                <button type="submit" 
+                        class="px-4 py-2 bg-lime-600 hover:bg-lime-700 dark:bg-lime-700 dark:hover:bg-lime-600 text-white rounded transition-colors">Send</button>
+            </div>
+            <div class="flex gap-4 items-center text-sm">
+                <div class="flex items-center gap-2">
+                    <label class="text-lime-700 dark:text-lime-300">Provider:</label>
+                    <select class="px-2 py-1 border border-lime-300 dark:border-gray-600 rounded bg-white dark:bg-gray-700 text-gray-900 dark:text-gray-100 text-sm focus:outline-none focus:ring-2 focus:ring-lime-400 dark:focus:ring-lime-500">
+                        <option value="anthropic">Anthropic</option>
+                        <option value="openai">OpenAI</option>
+                    </select>
+                </div>
+                <div class="flex items-center gap-2">
+                    <label class="text-lime-700 dark:text-lime-300">Model:</label>
+                    <select class="px-2 py-1 border border-lime-300 dark:border-gray-600 rounded bg-white dark:bg-gray-700 text-gray-900 dark:text-gray-100 text-sm focus:outline-none focus:ring-2 focus:ring-lime-400 dark:focus:ring-lime-500">
+                        <option value="claude-3-5-sonnet">Claude 3.5 Sonnet</option>
+                        <option value="gpt-4">GPT-4</option>
+                    </select>
+                </div>
+            </div>
+        </form>
+    </div>
+
+    <script>
+        function toggleDark() {
+            document.documentElement.classList.toggle('dark');
+            const isDark = document.documentElement.classList.contains('dark');
+            localStorage.setItem('darkMode', isDark);
+            
+            const btn = document.querySelector('button[onclick="toggleDark()"]');
+            btn.innerHTML = isDark ? '☀️ Light' : '🌙 Dark';
+        }
+
+        // Initialize
+        if (localStorage.getItem('darkMode') === 'true') {
+            document.documentElement.classList.add('dark');
+            const btn = document.querySelector('button[onclick="toggleDark()"]');
+            if (btn) btn.innerHTML = '☀️ Light';
+        }
+    </script>
+</body>
+</html>

@@ -109,7 +109,7 @@ func TestMessagePartsPrefixStability(t *testing.T) {
 	expectedSequence := []string{
 		"The",
 		"The quick",
-		"A quick",        // First part updated
+		"A quick", // First part updated
 		"A quick brown",
 		"A very quick brown", // Middle part updated
 		"A very quick brown fox",
@@ -281,7 +281,7 @@ func TestValidateAndExtractMessagePart(t *testing.T) {
 		{
 			name: "wrong event type",
 			event: map[string]interface{}{
-				"type": "other.event",
+				"type":       "other.event",
 				"properties": map[string]interface{}{},
 			},
 			wantErr: true,
@@ -340,19 +340,19 @@ func TestSequentialUpdates(t *testing.T) {
 	for i := 0; i < 10; i++ {
 		expectedID := fmt.Sprintf("part%d", i)
 		expectedContent := fmt.Sprintf("content-%d-99", i) // Last update value
-		
+
 		found := false
 		for _, p := range parts {
 			if p.PartID == expectedID {
 				found = true
 				if p.Content != expectedContent {
-					t.Errorf("Part %s has wrong content: got %q, want %q", 
+					t.Errorf("Part %s has wrong content: got %q, want %q",
 						expectedID, p.Content, expectedContent)
 				}
 				break
 			}
 		}
-		
+
 		if !found {
 			t.Errorf("Missing part %s after updates", expectedID)
 		}

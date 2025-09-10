@@ -30,7 +30,7 @@ var staticFS embed.FS
 type Server struct {
 	opencodePort int
 	opencodeCmd  *exec.Cmd
-	opencodeDir  string // Temporary directory for opencode
+	opencodeDir  string            // Temporary directory for opencode
 	sessions     map[string]string // cookie -> opencode session ID
 	mu           sync.RWMutex
 	providers    []Provider
@@ -61,8 +61,13 @@ type SessionResponse struct {
 type MessageInfo struct {
 	ID         string `json:"id"`
 	Role       string `json:"role"`
+	SessionID  string `json:"sessionID,omitempty"`
 	ProviderID string `json:"providerID,omitempty"`
 	ModelID    string `json:"modelID,omitempty"`
+	Time       struct {
+		Created int64 `json:"created,omitempty"`
+		Updated int64 `json:"updated,omitempty"`
+	} `json:"time,omitempty"`
 }
 
 type MessagePart struct {
@@ -75,8 +80,8 @@ type MessagePart struct {
 	CallID    string                 `json:"callID,omitempty"`
 	State     map[string]interface{} `json:"state,omitempty"`
 	Time      struct {
-		Start string `json:"start,omitempty"`
-		End   string `json:"end,omitempty"`
+		Start int64 `json:"start,omitempty"`
+		End   int64 `json:"end,omitempty"`
 	} `json:"time,omitempty"`
 }
 
@@ -96,7 +101,7 @@ func NewLoggingResponseWriter(w http.ResponseWriter) *LoggingResponseWriter {
 	return &LoggingResponseWriter{
 		ResponseWriter: w,
 		statusCode:     200,
-		body:          &bytes.Buffer{},
+		body:           &bytes.Buffer{},
 	}
 }
 
@@ -114,13 +119,6 @@ func (lw *LoggingResponseWriter) LogResponse(method, path string) {
 	bodyStr := lw.body.String()
 	log.Printf("WIRE_OUT %s %s [%d]: %s", method, path, lw.statusCode, bodyStr)
 }
-
-
-
-
-
-
-
 
 // NewServer creates a new Server instance with properly initialized templates
 func NewServer(opencodePort int) (*Server, error) {
@@ -175,7 +173,7 @@ func main() {
 		server.stopOpencodeServer()
 		log.Fatalf("Opencode server not ready: %v", err)
 	}
-	
+
 	// CRITICAL: Verify opencode is running in the isolated directory
 	if err := server.verifyOpencodeIsolation(); err != nil {
 		server.stopOpencodeServer()
@@ -199,7 +197,7 @@ func main() {
 				log.Printf("WIRE_OUT SSE connection ended: %s %s", r.Method, r.URL.Path)
 				return
 			}
-			
+
 			lw := NewLoggingResponseWriter(w)
 			handler(lw, r)
 			lw.LogResponse(r.Method, r.URL.Path)
@@ -211,19 +209,18 @@ func main() {
 	http.HandleFunc("/send", loggingMiddleware(server.handleSend))
 	http.HandleFunc("/events", loggingMiddleware(server.handleSSE))
 	http.HandleFunc("/clear", loggingMiddleware(server.handleClear))
-	http.HandleFunc("/messages", loggingMiddleware(server.handleMessages))
 	http.HandleFunc("/models", loggingMiddleware(server.handleModels))
 	http.Handle("/static/", http.FileServer(http.FS(staticFS)))
 
 	// Set up signal handling for graceful shutdown
 	sigChan := make(chan os.Signal, 1)
 	signal.Notify(sigChan, os.Interrupt, syscall.SIGTERM)
-	
+
 	// Create HTTP server with context
 	srv := &http.Server{
 		Addr: fmt.Sprintf(":%d", *port),
 	}
-	
+
 	// Start server in a goroutine
 	go func() {
 		log.Printf("Starting server on port %d (opencode on %d)\n", *port, server.opencodePort)
@@ -231,20 +228,20 @@ func main() {
 			log.Fatalf("Server failed: %v", err)
 		}
 	}()
-	
+
 	// Wait for interrupt signal
 	sig := <-sigChan
 	log.Printf("\nReceived signal %v, shutting down gracefully...", sig)
-	
+
 	// Create a context with timeout for shutdown
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
-	
+
 	// Shutdown the HTTP server
 	if err := srv.Shutdown(ctx); err != nil {
 		log.Printf("HTTP server shutdown error: %v", err)
 	}
-	
+
 	// Note: opencode cleanup happens via defer
 	log.Printf("Shutdown complete")
 }
@@ -257,36 +254,36 @@ func (s *Server) startOpencodeServer() error {
 	}
 	s.opencodeDir = tmpDir
 	log.Printf("SECURITY: Created isolated temporary directory for opencode: %s", tmpDir)
-	
+
 	// Create a marker file to verify isolation
 	markerPath := filepath.Join(tmpDir, ".opencode-isolation-marker")
 	if err := os.WriteFile(markerPath, []byte("opencode should run here"), 0644); err != nil {
 		os.RemoveAll(tmpDir)
 		return fmt.Errorf("failed to create isolation marker: %w", err)
 	}
-	
+
 	// Verify we're NOT in the user's working directory
 	userCwd, _ := os.Getwd()
 	if strings.HasPrefix(tmpDir, userCwd) || strings.HasPrefix(userCwd, tmpDir) {
 		os.RemoveAll(tmpDir)
 		return fmt.Errorf("CRITICAL SECURITY ERROR: temp directory %s overlaps with user directory %s", tmpDir, userCwd)
 	}
-	
+
 	// Start opencode in the temporary directory
 	s.opencodeCmd = exec.Command("opencode", "serve", "--port", fmt.Sprintf("%d", s.opencodePort))
 	s.opencodeCmd.Dir = tmpDir // CRITICAL: Run opencode in the temp directory
 	s.opencodeCmd.Stdout = os.Stdout
 	s.opencodeCmd.Stderr = os.Stderr
-	
+
 	// Add environment variable to make it clear where opencode should run
 	s.opencodeCmd.Env = append(os.Environ(), fmt.Sprintf("OPENCODE_WORKDIR=%s", tmpDir))
-	
+
 	if err := s.opencodeCmd.Start(); err != nil {
 		os.RemoveAll(tmpDir)
 		return fmt.Errorf("failed to start opencode: %w", err)
 	}
-	
-	log.Printf("SECURITY: opencode process started with PID %d in isolated directory %s", 
+
+	log.Printf("SECURITY: opencode process started with PID %d in isolated directory %s",
 		s.opencodeCmd.Process.Pid, tmpDir)
 	return nil
 }
@@ -296,7 +293,7 @@ func (s *Server) stopOpencodeServer() {
 	if s.opencodeCmd == nil && s.opencodeDir == "" {
 		return
 	}
-	
+
 	// First, stop the opencode process completely
 	processStoppedSuccessfully := true
 	if s.opencodeCmd != nil && s.opencodeCmd.Process != nil {
@@ -306,14 +303,14 @@ func (s *Server) stopOpencodeServer() {
 			log.Printf("Failed to send interrupt signal: %v", err)
 			processStoppedSuccessfully = false
 		}
-		
+
 		// Give it 2 seconds to gracefully shutdown
 		done := make(chan error, 1)
 		go func() {
 			defer close(done) // Ensure channel is closed to prevent leaks
 			done <- s.opencodeCmd.Wait()
 		}()
-		
+
 		select {
 		case err := <-done:
 			if err != nil {
@@ -333,7 +330,7 @@ func (s *Server) stopOpencodeServer() {
 		}
 		s.opencodeCmd = nil // Prevent double cleanup
 	}
-	
+
 	// Only clean up directory after process is stopped (or we tried our best)
 	if s.opencodeDir != "" {
 		if processStoppedSuccessfully {
@@ -341,7 +338,7 @@ func (s *Server) stopOpencodeServer() {
 		} else {
 			log.Printf("WARNING: Process may still be running, attempting directory cleanup anyway: %s", s.opencodeDir)
 		}
-		
+
 		if err := os.RemoveAll(s.opencodeDir); err != nil {
 			log.Printf("Warning: failed to clean up temp directory %s: %v", s.opencodeDir, err)
 		}
@@ -367,14 +364,14 @@ func waitForOpencodeReady(port int, timeout time.Duration) error {
 
 // verifyOpencodeIsolation verifies opencode is running in the isolated temporary directory
 func (s *Server) verifyOpencodeIsolation() error {
-	
+
 	// Call the /path endpoint to get opencode's current working directory
 	resp, err := http.Get(fmt.Sprintf("http://localhost:%d/path", s.opencodePort))
 	if err != nil {
 		return fmt.Errorf("failed to query opencode /path endpoint: %w", err)
 	}
 	defer resp.Body.Close()
-	
+
 	// The /path endpoint returns: {"state":"...", "config":"...", "worktree":"...", "directory":"..."}
 	var pathResponse struct {
 		State     string `json:"state"`
@@ -382,36 +379,36 @@ func (s *Server) verifyOpencodeIsolation() error {
 		Worktree  string `json:"worktree"`
 		Directory string `json:"directory"`
 	}
-	
+
 	if err := json.NewDecoder(resp.Body).Decode(&pathResponse); err != nil {
 		return fmt.Errorf("failed to decode /path response: %w", err)
 	}
-	
+
 	// Check if directory is empty
 	if pathResponse.Directory == "" {
 		return fmt.Errorf("opencode /path endpoint returned empty directory - opencode may not be running correctly")
 	}
-	
+
 	// Verify the directory matches our temporary directory
 	if pathResponse.Directory != s.opencodeDir {
-		return fmt.Errorf("opencode is NOT running in isolated directory! Expected: %s, Got: %s", 
+		return fmt.Errorf("opencode is NOT running in isolated directory! Expected: %s, Got: %s",
 			s.opencodeDir, pathResponse.Directory)
 	}
-	
+
 	// Additional safety check: ensure it's not in the user's working directory
 	userCwd, _ := os.Getwd()
 	if strings.HasPrefix(pathResponse.Directory, userCwd) {
-		return fmt.Errorf("opencode is running in user's directory %s instead of isolated temp directory", 
+		return fmt.Errorf("opencode is running in user's directory %s instead of isolated temp directory",
 			pathResponse.Directory)
 	}
-	
+
 	// Verify it's in the system temp directory
 	systemTempDir := os.TempDir()
 	if !strings.HasPrefix(pathResponse.Directory, systemTempDir) {
-		return fmt.Errorf("opencode directory %s is not in system temp directory %s", 
+		return fmt.Errorf("opencode directory %s is not in system temp directory %s",
 			pathResponse.Directory, systemTempDir)
 	}
-	
+
 	log.Printf("✓ SECURITY VERIFIED: opencode is correctly isolated in: %s", pathResponse.Directory)
 	log.Printf("  - State directory: %s", pathResponse.State)
 	log.Printf("  - Config directory: %s", pathResponse.Config)
@@ -437,12 +434,23 @@ func (s *Server) loadProviders() error {
 }
 
 func (s *Server) getOrCreateSession(cookie string) (string, error) {
+	// First check (with read lock)
 	s.mu.RLock()
 	sessionID, exists := s.sessions[cookie]
 	s.mu.RUnlock()
 
 	if exists {
 		log.Printf("getOrCreateSession: found existing session %s for cookie %s", sessionID, cookie)
+		return sessionID, nil
+	}
+
+	// Acquire write lock for session creation
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	// Double-check: another goroutine might have created the session while we waited for the lock
+	if sessionID, exists := s.sessions[cookie]; exists {
+		log.Printf("getOrCreateSession: found existing session %s for cookie %s (double-check)", sessionID, cookie)
 		return sessionID, nil
 	}
 
@@ -467,14 +475,10 @@ func (s *Server) getOrCreateSession(cookie string) (string, error) {
 		return "", err
 	}
 
-	s.mu.Lock()
 	s.sessions[cookie] = session.ID
-	s.mu.Unlock()
-
 	log.Printf("getOrCreateSession: created new session %s for cookie %s", session.ID, cookie)
 	return session.ID, nil
 }
-
 
 func (s *Server) handleIndex(w http.ResponseWriter, r *http.Request) {
 	cookie, err := r.Cookie("session")
@@ -579,19 +583,18 @@ func (s *Server) handleSend(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Render user message with unified renderer
-	renderedHTML := renderText(message)
-	
+	// Use transformMessagePart for consistent rendering
+	userPart := transformMessagePart(s.templates, MessagePart{
+		Type: "text",
+		Text: message,
+	})
+
 	msgData := MessageData{
 		Alignment: "right",
 		Text:      message,
 		Provider:  provider,
 		Model:     model,
-		Parts: []MessagePartData{{
-			Type:         "text",
-			Content:      message,  // Keep original text
-			RenderedHTML: renderedHTML,
-		}},
+		Parts:     []MessagePartData{userPart},
 	}
 
 	w.Header().Set("Content-Type", "text/html")
@@ -674,11 +677,26 @@ func (s *Server) handleSSE(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Connect to opencode SSE
+	// Connect to opencode SSE with context cancellation
+	ctx, cancel := context.WithCancel(r.Context())
+	defer cancel()
+
+	// Monitor for client disconnect
+	go func() {
+		<-ctx.Done()
+		// Context cancelled (client disconnected or request ended)
+	}()
+
 	client := &http.Client{Timeout: 0}
 	sseURL := fmt.Sprintf("http://localhost:%d/event", s.opencodePort)
 	log.Printf("Connecting to OpenCode SSE at: %s", sseURL)
-	req, _ := http.NewRequest("GET", sseURL, nil)
+
+	req, err := http.NewRequestWithContext(ctx, "GET", sseURL, nil)
+	if err != nil {
+		log.Printf("Failed to create SSE request: %v", err)
+		return
+	}
+
 	resp, err := client.Do(req)
 	if err != nil {
 		log.Printf("Failed to connect to OpenCode SSE: %v", err)
@@ -738,110 +756,15 @@ func (s *Server) handleSSE(w http.ResponseWriter, r *http.Request) {
 					// Skip invalid events (includes wrong session, missing IDs, etc.)
 					continue
 				}
-				
+
 				// Skip user messages - we only want to stream assistant messages
 				if role, exists := messageRoles[msgID]; exists && role == "user" {
 					continue
 				}
 
-				var newPart MessagePartData
-				// Update the specific part
-				switch part["type"] {
-				case "text":
-					if text, ok := part["text"].(string); ok {
-						// Render with unified renderer
-						renderedHTML := renderText(text)
-						
-						newPart = MessagePartData{
-							Type:         "text",
-							Content:      text,  // Keep original text
-							RenderedHTML: renderedHTML,
-						}
-					}
-				case "reasoning":
-					if text, ok := part["text"].(string); ok {
-						reasoningText := fmt.Sprintf("🤔 Reasoning:\n%s", text)
-						newPart = MessagePartData{
-							Type:    "reasoning",
-							Content: reasoningText,
-							// No RenderedHTML - will use .Content in <pre> tag
-						}
-					}
-				case "tool":
-					// Store tool information for rendering
-					toolName, _ := part["tool"].(string)
-					if state, ok := part["state"].(map[string]interface{}); ok {
-						status, _ := state["status"].(string)
-						input, _ := state["input"].(map[string]interface{})
-						output, _ := state["output"].(string)
-						
-						// Use the new renderToolDetails function
-						renderedHTML := renderToolDetails(s.templates, toolName, status, input, output)
-						
-						// Create a simple text fallback for non-HTML contexts
-						var toolContent strings.Builder
-						toolContent.WriteString(fmt.Sprintf("Tool: %s (Status: %s)", toolName, status))
-						if len(input) > 0 {
-							toolContent.WriteString("\nInput: ")
-							for key, value := range input {
-								toolContent.WriteString(fmt.Sprintf("%s=%v ", key, value))
-							}
-						}
-						if output != "" {
-							toolContent.WriteString("\nOutput:\n" + output)
-						}
-						
-						newPart = MessagePartData{
-							Type:         "tool",
-							Content:      toolContent.String(),
-							RenderedHTML: renderedHTML,
-						}
-					}
-				case "file":
-					filename, _ := part["filename"].(string)
-					url, _ := part["url"].(string)
-					newPart = MessagePartData{
-						Type:    "file",
-						Content: fmt.Sprintf("📁 File: %s\nURL: %s", filename, url),
-					}
-				case "snapshot":
-					newPart = MessagePartData{
-						Type:    "snapshot",
-						Content: "📸 Snapshot taken",
-					}
-				case "patch":
-					newPart = MessagePartData{
-						Type:    "patch", 
-						Content: "🔧 Code patch applied",
-					}
-				case "agent":
-					newPart = MessagePartData{
-						Type:    "agent",
-						Content: "🤖 Agent action",
-					}
-				case "step-start":
-					// Render as status badge (block-level for new line)
-					badgeHTML := template.HTML(`<div class="flex items-center gap-2 px-3 py-1 bg-yellow-100 text-yellow-800 rounded-full text-sm my-2 w-fit">
-						<span>▶️</span>
-						<span>Step started</span>
-					</div>`)
-					newPart = MessagePartData{
-						Type:         "step-start",
-						Content:      "▶️ Step started",
-						RenderedHTML: badgeHTML,
-					}
-				case "step-finish":
-					// Mark message as complete - render as status badge (block-level for new line)
-					badgeHTML := template.HTML(`<div class="flex items-center gap-2 px-3 py-1 bg-green-100 text-green-800 rounded-full text-sm my-2 w-fit">
-						<span>✅</span>
-						<span>Step completed</span>
-					</div>`)
-					newPart = MessagePartData{
-						Type:         "step-finish",
-						Content:      "✅ Step completed",
-						RenderedHTML: badgeHTML,
-					}
-				}
+				// Parse raw message part data and transform it to MessagePartData
+				msgPart := parseRawMessagePart(partID, part)
+				newPart := transformMessagePart(s.templates, msgPart)
 
 				// Update the part in the manager
 				if err := partsManager.UpdatePart(msgID, partID, newPart); err != nil {
@@ -853,7 +776,7 @@ func (s *Server) handleSSE(w http.ResponseWriter, r *http.Request) {
 				completeParts := partsManager.GetParts(msgID)
 				var completeText strings.Builder
 				isStreaming := true
-				
+
 				for _, msgPart := range completeParts {
 					if msgPart.Type == "text" {
 						completeText.WriteString(msgPart.Content)
@@ -877,7 +800,7 @@ func (s *Server) handleSSE(w http.ResponseWriter, r *http.Request) {
 				html, err := renderMessage(s.templates, msgData)
 				if err == nil {
 					html = strings.TrimSpace(html)
-					
+
 					// Send multi-line HTML using multiple data: lines (SSE standard)
 					fmt.Fprintf(w, "event: message\n")
 					lines := strings.Split(html, "\n")
@@ -886,10 +809,10 @@ func (s *Server) handleSSE(w http.ResponseWriter, r *http.Request) {
 					}
 					fmt.Fprintf(w, "\n") // Empty line to end the event
 					flusher.Flush()
-					
+
 					// Log the SSE message sent to client
 					log.Printf("WIRE_OUT SSE [msgID=%s]: %s", msgID, html)
-					
+
 					// Mark that we've sent the first event for this message
 					if !messageFirstSent[msgID] {
 						messageFirstSent[msgID] = true
@@ -922,7 +845,12 @@ func (s *Server) handleClear(w http.ResponseWriter, r *http.Request) {
 		// Delete the session from opencode
 		req, _ := http.NewRequest("DELETE", fmt.Sprintf("http://localhost:%d/session/%s", s.opencodePort, sessionID), nil)
 		client := &http.Client{}
-		client.Do(req)
+		resp, err := client.Do(req)
+		if err != nil {
+			log.Printf("Failed to delete session from opencode: %v", err)
+		} else {
+			resp.Body.Close()
+		}
 	}
 
 	// Remove from our map
@@ -946,25 +874,39 @@ func (s *Server) getMessagesHTML(sessionID string) string {
 	// Get messages from opencode
 	resp, err := http.Get(fmt.Sprintf("http://localhost:%d/session/%s/message", s.opencodePort, sessionID))
 	if err != nil {
+		log.Printf("getMessagesHTML: Failed to fetch messages: %v", err)
 		return ""
 	}
 	defer resp.Body.Close()
 
 	var messages []MessageResponse
 	if err := json.NewDecoder(resp.Body).Decode(&messages); err != nil {
+		log.Printf("getMessagesHTML: Failed to decode messages: %v", err)
 		return ""
 	}
 
+	log.Printf("getMessagesHTML: Got %d messages for session %s", len(messages), sessionID)
+
 	var html strings.Builder
 	for _, msg := range messages {
-		text := ""
+		// Transform all parts using the same rendering pipeline as SSE
+		var parts []MessagePartData
+		hasContent := false
+
 		for _, part := range msg.Parts {
-			if part.Type == "text" {
-				text += part.Text
+			transformedPart := transformMessagePart(s.templates, part)
+			parts = append(parts, transformedPart)
+
+			// Check if this message has any visible content
+			if part.Type == "text" && part.Text != "" {
+				hasContent = true
+			} else if part.Type != "" {
+				hasContent = true
 			}
 		}
 
-		if text == "" {
+		// Skip messages with no content
+		if !hasContent {
 			continue
 		}
 
@@ -974,18 +916,21 @@ func (s *Server) getMessagesHTML(sessionID string) string {
 		}
 
 		msgData := MessageData{
+			ID:        msg.Info.ID,
 			Alignment: alignment,
-			Text:      text,
+			Parts:     parts,
 			Provider:  msg.Info.ProviderID,
 			Model:     msg.Info.ModelID,
 		}
 
-		if msgHTML, err := renderMessage(s.templates, msgData); err == nil {
-			html.WriteString(msgHTML)
+		if err := s.templates.ExecuteTemplate(&html, "message", msgData); err != nil {
+			log.Printf("getMessagesHTML: Template error: %v", err)
 		}
 	}
 
-	return html.String()
+	result := html.String()
+	log.Printf("getMessagesHTML: Generated %d bytes of HTML", len(result))
+	return result
 }
 
 func (s *Server) handleModels(w http.ResponseWriter, r *http.Request) {
@@ -1013,72 +958,9 @@ func (s *Server) handleModels(w http.ResponseWriter, r *http.Request) {
 	}
 }
 
-func (s *Server) handleMessages(w http.ResponseWriter, r *http.Request) {
-	cookie, err := r.Cookie("session")
-	if err != nil {
-		http.Error(w, "No session", http.StatusBadRequest)
-		return
+func min(a, b int) int {
+	if a < b {
+		return a
 	}
-
-	sessionID, err := s.getOrCreateSession(cookie.Value)
-	if err != nil {
-		http.Error(w, "Session error", http.StatusInternalServerError)
-		return
-	}
-
-	// Get messages from opencode
-	resp, err := http.Get(fmt.Sprintf("http://localhost:%d/session/%s/message", s.opencodePort, sessionID))
-	if err != nil {
-		http.Error(w, "Failed to get messages", http.StatusInternalServerError)
-		return
-	}
-	defer resp.Body.Close()
-
-	var messages []MessageResponse
-	if err := json.NewDecoder(resp.Body).Decode(&messages); err != nil {
-		http.Error(w, "Failed to parse messages", http.StatusInternalServerError)
-		return
-	}
-
-	w.Header().Set("Content-Type", "text/html")
-
-	for _, msg := range messages {
-		// Transform all parts using the same rendering pipeline as SSE
-		var parts []MessagePartData
-		hasContent := false
-		
-		for _, part := range msg.Parts {
-			transformedPart := transformMessagePart(s.templates, part)
-			parts = append(parts, transformedPart)
-			
-			// Check if this message has any visible content
-			if part.Type == "text" && part.Text != "" {
-				hasContent = true
-			} else if part.Type != "" {
-				hasContent = true
-			}
-		}
-		
-		// Skip messages with no content
-		if !hasContent {
-			continue
-		}
-
-		alignment := "left"
-		if msg.Info.Role == "user" {
-			alignment = "right"
-		}
-
-		msgData := MessageData{
-			ID:        msg.Info.ID,
-			Alignment: alignment,
-			Parts:     parts,
-			Provider:  msg.Info.ProviderID,
-			Model:     msg.Info.ModelID,
-		}
-
-		if err := s.templates.ExecuteTemplate(w, "message", msgData); err != nil {
-			log.Printf("Template error in handleMessages: %v", err)
-		}
-	}
+	return b
 }

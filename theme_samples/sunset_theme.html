@@ -1,0 +1,160 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>OpenCode Chat - Sunset Theme</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <style>
+        .streaming::after {
+            content: '...';
+            display: inline-block;
+            animation: dots 1.5s steps(4) infinite;
+            width: 20px;
+            text-align: left;
+        }
+        @keyframes dots {
+            0%, 20% { content: '.'; }
+            40% { content: '..'; }
+            60%, 100% { content: '...'; }
+        }
+    </style>
+</head>
+<body class="h-screen flex flex-col bg-orange-50">
+    <!-- Header -->
+    <div class="bg-rose-800 text-white px-4 py-6 flex justify-between items-center">
+        <h1 class="text-xl font-semibold">OpenCode Chat - Sunset</h1>
+        <button class="px-4 py-2 bg-rose-600 hover:bg-rose-700 text-white rounded transition-colors">Clear Session</button>
+    </div>
+    
+    <!-- Messages -->
+    <div class="flex-1 overflow-y-auto p-4 space-y-4">
+        <!-- User Message -->
+        <div class="flex justify-end">
+            <div class="max-w-[70%] p-4 rounded-lg break-words bg-rose-100 border-l-4 border-rose-500 shadow-sm">
+                <div class="text-base">
+                    What's the best way to optimize React performance?
+                </div>
+                <div class="text-xs text-rose-600 mt-1">anthropic/claude-3-5-sonnet</div>
+            </div>
+        </div>
+
+        <!-- Assistant Message -->
+        <div class="flex justify-start">
+            <div class="max-w-[70%] p-4 rounded-lg break-words bg-amber-50 border-l-4 border-orange-500 shadow-sm">
+                <div class="text-base">
+                    Great question! React performance optimization involves several key strategies:
+
+                    <h3 class="font-semibold mt-4 mb-2 text-orange-800">1. Memoization</h3>
+                    <p class="mb-2">Use React.memo, useMemo, and useCallback to prevent unnecessary re-renders:</p>
+                </div>
+                <div class="text-xs text-orange-600 mt-1">anthropic/claude-3-5-sonnet</div>
+            </div>
+        </div>
+
+        <!-- Tool Message -->
+        <div class="flex justify-start">
+            <div class="max-w-[70%] p-4 rounded-lg break-words bg-amber-900 text-white border-l-4 border-yellow-500 shadow-sm">
+                <details class="border border-amber-700 rounded-lg">
+                    <summary class="px-3 py-2 bg-amber-800 hover:bg-amber-700 cursor-pointer rounded-t-lg">
+                        <span class="inline-flex items-center gap-2">
+                            <span>📄</span>
+                            <span class="font-medium">write</span>
+                            <span class="text-amber-300">OptimizedComponent.jsx</span>
+                        </span>
+                        <span class="ml-auto text-xs text-amber-400">success</span>
+                    </summary>
+                    <div class="p-3 border-t border-amber-700">
+                        <pre class="bg-amber-950 text-amber-100 p-3 rounded overflow-x-auto text-sm">import React, { memo, useMemo, useCallback } from 'react';
+
+const OptimizedComponent = memo(({ items, onItemClick }) => {
+  const expensiveValue = useMemo(() => {
+    return items.reduce((sum, item) => sum + item.value, 0);
+  }, [items]);
+
+  const handleClick = useCallback((id) => {
+    onItemClick(id);
+  }, [onItemClick]);
+
+  return (
+    &lt;div&gt;
+      &lt;p&gt;Total: {expensiveValue}&lt;/p&gt;
+      {items.map(item =&gt; (
+        &lt;Item key={item.id} {...item} onClick={handleClick} /&gt;
+      ))}
+    &lt;/div&gt;
+  );
+});</pre>
+                    </div>
+                </details>
+                <div class="text-xs text-yellow-400 mt-1">anthropic/claude-3-5-sonnet</div>
+            </div>
+        </div>
+
+        <!-- Todo List -->
+        <div class="flex justify-start">
+            <div class="max-w-[70%] p-4 rounded-lg break-words bg-yellow-50 border border-yellow-200 shadow-sm">
+                <div class="flex items-center gap-2 mb-2">
+                    <span>✅</span>
+                    <span class="font-medium text-yellow-900">Todo List Updated</span>
+                </div>
+                <div class="space-y-1 text-sm">
+                    <div class="flex items-start gap-2">
+                        <span class="text-green-600">✓</span>
+                        <span class="text-xs text-gray-400">1.</span>
+                        <span class="line-through text-gray-500">Implement React.memo for expensive components</span>
+                    </div>
+                    <div class="flex items-start gap-2">
+                        <span class="text-blue-600">⏳</span>
+                        <span class="text-xs text-gray-400">2.</span>
+                        <span class="text-blue-800">Add useMemo for expensive calculations</span>
+                    </div>
+                    <div class="flex items-start gap-2">
+                        <span class="text-gray-500">☐</span>
+                        <span class="text-xs text-gray-400">3.</span>
+                        <span class="text-gray-800">Optimize bundle with code splitting</span>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <!-- Streaming Message -->
+        <div class="flex justify-start">
+            <div class="max-w-[70%] p-4 rounded-lg break-words bg-amber-50 border-l-4 border-orange-500 shadow-sm streaming">
+                <div class="text-base">
+                    Next, let's look at code splitting with React.lazy
+                </div>
+            </div>
+        </div>
+    </div>
+    
+    <!-- Form -->
+    <div class="bg-rose-50 border-t border-rose-200 p-4">
+        <form class="space-y-3">
+            <div class="flex gap-4 items-end">
+                <textarea placeholder="Type your message... (Shift+Enter for new line)" 
+                          rows="1"
+                          class="flex-1 px-3 py-2 border border-rose-300 rounded focus:outline-none focus:ring-2 focus:ring-rose-400 resize-none"></textarea>
+                <button type="submit" 
+                        class="px-4 py-2 bg-rose-600 hover:bg-rose-700 text-white rounded transition-colors">Send</button>
+            </div>
+            <div class="flex gap-4 items-center text-sm">
+                <div class="flex items-center gap-2">
+                    <label class="text-rose-700">Provider:</label>
+                    <select class="px-2 py-1 border border-rose-300 rounded bg-white text-sm focus:outline-none focus:ring-2 focus:ring-rose-400">
+                        <option value="anthropic">Anthropic</option>
+                        <option value="openai">OpenAI</option>
+                    </select>
+                </div>
+                <div class="flex items-center gap-2">
+                    <label class="text-rose-700">Model:</label>
+                    <select class="px-2 py-1 border border-rose-300 rounded bg-white text-sm focus:outline-none focus:ring-2 focus:ring-rose-400">
+                        <option value="claude-3-5-sonnet">Claude 3.5 Sonnet</option>
+                        <option value="gpt-4">GPT-4</option>
+                    </select>
+                </div>
+            </div>
+        </form>
+    </div>
+</body>
+</html>

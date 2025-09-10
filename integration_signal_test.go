@@ -24,32 +24,32 @@ func TestSignalHandling(t *testing.T) {
 	cmd := exec.Command("./test-opencode-chat", "-port", fmt.Sprintf("%d", port))
 	cmd.Stdout = os.Stdout
 	cmd.Stderr = os.Stderr
-	
+
 	if err := cmd.Start(); err != nil {
 		t.Fatalf("Failed to start application: %v", err)
 	}
-	
+
 	// Wait for the server to be ready
 	if err := WaitForHTTPServerReady(port, 10*time.Second); err != nil {
 		cmd.Process.Kill()
 		t.Fatalf("Server not ready: %v", err)
 	}
-	
+
 	// Get the process ID
 	pid := cmd.Process.Pid
 	t.Logf("Application started with PID %d", pid)
-	
+
 	// Send SIGINT (Ctrl-C)
 	if err := cmd.Process.Signal(syscall.SIGINT); err != nil {
 		t.Fatalf("Failed to send SIGINT: %v", err)
 	}
-	
+
 	// Wait for graceful shutdown (should complete within 10 seconds)
 	done := make(chan error, 1)
 	go func() {
 		done <- cmd.Wait()
 	}()
-	
+
 	select {
 	case err := <-done:
 		if err != nil {
@@ -69,7 +69,7 @@ func TestSignalHandling(t *testing.T) {
 		cmd.Process.Kill()
 		t.Fatal("Process did not terminate within 10 seconds after SIGINT")
 	}
-	
+
 	// Verify the server is no longer responding
 	if err := WaitForServerShutdown(port, 5*time.Second); err != nil {
 		t.Errorf("Server still responding after shutdown: %v", err)
@@ -90,17 +90,17 @@ func TestOpencodeCleanupOnSignal(t *testing.T) {
 	cmd := exec.Command("./test-opencode-chat", "-port", fmt.Sprintf("%d", port))
 	cmd.Stdout = os.Stdout
 	cmd.Stderr = os.Stderr
-	
+
 	if err := cmd.Start(); err != nil {
 		t.Fatalf("Failed to start application: %v", err)
 	}
-	
+
 	// Wait for the server to be ready
 	if err := WaitForHTTPServerReady(port, 10*time.Second); err != nil {
 		cmd.Process.Kill()
 		t.Fatalf("Server not ready: %v", err)
 	}
-	
+
 	// Find temp directory by looking for one with our PID
 	var tempDir string
 	pid := cmd.Process.Pid
@@ -109,31 +109,31 @@ func TestOpencodeCleanupOnSignal(t *testing.T) {
 	if len(matches) > 0 {
 		tempDir = matches[0]
 	}
-	
+
 	if tempDir != "" {
 		t.Logf("Found opencode temp directory: %s", tempDir)
-		
+
 		// Verify it exists
 		if _, err := os.Stat(tempDir); os.IsNotExist(err) {
 			t.Errorf("Temp directory does not exist: %s", tempDir)
 		}
 	}
-	
+
 	// Check for opencode processes before signal
 	opencodeCountBefore := countOpencodeProcesses()
 	t.Logf("Opencode processes before signal: %d", opencodeCountBefore)
-	
+
 	// Send SIGTERM
 	if err := cmd.Process.Signal(syscall.SIGTERM); err != nil {
 		t.Fatalf("Failed to send SIGTERM: %v", err)
 	}
-	
+
 	// Wait for shutdown
 	done := make(chan error, 1)
 	go func() {
 		done <- cmd.Wait()
 	}()
-	
+
 	select {
 	case <-done:
 		t.Log("Process terminated")
@@ -141,25 +141,25 @@ func TestOpencodeCleanupOnSignal(t *testing.T) {
 		cmd.Process.Kill()
 		t.Fatal("Process did not terminate within 10 seconds")
 	}
-	
+
 	// Wait for opencode processes to be cleaned up
 	expectedCount := opencodeCountBefore - 1
 	if expectedCount < 0 {
 		expectedCount = 0
 	}
-	
+
 	if err := WaitForProcessCount(expectedCount, 5*time.Second); err != nil {
 		t.Logf("Warning: %v", err)
 	}
-	
+
 	// Check for opencode processes after signal
 	opencodeCountAfter := countOpencodeProcesses()
 	t.Logf("Opencode processes after signal: %d (was %d)", opencodeCountAfter, opencodeCountBefore)
-	
+
 	if opencodeCountAfter >= opencodeCountBefore && opencodeCountBefore > 0 {
 		t.Error("Opencode process was not terminated")
 	}
-	
+
 	// Verify temp directory was cleaned up
 	if tempDir != "" {
 		if _, err := os.Stat(tempDir); !os.IsNotExist(err) {
@@ -193,4 +193,3 @@ func findStringInOutput(output, search string) int {
 	}
 	return -1
 }
-

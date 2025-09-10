@@ -1,11 +1,6 @@
-// Enable HTMX logging for debugging
-htmx.logAll();
-console.log("HTMX logging enabled");
-
 // Handle Shift+Enter for newlines in message input
 document.addEventListener('DOMContentLoaded', function() {
     const messageInput = document.getElementById('message-input');
-    const messageForm = document.getElementById('message-form');
     
     if (messageInput) {
         // Auto-resize textarea as user types
@@ -14,7 +9,13 @@ document.addEventListener('DOMContentLoaded', function() {
             this.style.height = Math.min(this.scrollHeight, 200) + 'px';
         });
         
-        // Enter key handling now done via HTMX hx-trigger
+        // Enter key handling done via HTMX hx-trigger
         // Shift+Enter naturally adds newlines
+    }
+    
+    // Scroll to bottom on page load if there are messages
+    const messagesDiv = document.getElementById('messages');
+    if (messagesDiv) {
+        messagesDiv.scrollTop = messagesDiv.scrollHeight;
     }
 });

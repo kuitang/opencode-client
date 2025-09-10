@@ -41,19 +41,19 @@ func TestRenderTodoList(t *testing.T) {
 			]`,
 			expected: []string{
 				"☐", // pending checkbox
-				"⏳", // in progress checkbox  
+				"⏳", // in progress checkbox
 				"✓", // completed checkbox
 				"Write tests",
-				"Fix bugs", 
+				"Fix bugs",
 				"Deploy code",
-				"text-red-600", // high priority
+				"text-red-600",    // high priority
 				"text-yellow-600", // medium priority
-				"text-gray-400", // low priority
-				"line-through", // completed item styling
+				"text-gray-400",   // low priority
+				"line-through",    // completed item styling
 			},
 		},
 		{
-			name: "Invalid JSON fallback",
+			name:  "Invalid JSON fallback",
 			input: `not valid json`,
 			expected: []string{
 				"<pre class=\"overflow-x-auto\">",
@@ -61,7 +61,7 @@ func TestRenderTodoList(t *testing.T) {
 			},
 		},
 		{
-			name: "Empty array",
+			name:  "Empty array",
 			input: `[]`,
 			expected: []string{
 				"<div class=\"todo-list text-sm\">",
@@ -75,7 +75,7 @@ func TestRenderTodoList(t *testing.T) {
 			if err != nil {
 				t.Fatalf("renderTodoList failed: %v", err)
 			}
-			
+
 			resultStr := string(result)
 			for _, expected := range tt.expected {
 				if !strings.Contains(resultStr, expected) {
@@ -97,29 +97,29 @@ func TestTodoItemStatuses(t *testing.T) {
 		{"content": "In progress task", "status": "in_progress", "priority": "medium", "id": "2"}, 
 		{"content": "Completed task", "status": "completed", "priority": "low", "id": "3"}
 	]`
-	
+
 	result, err := renderTodoList(templates, input)
 	if err != nil {
 		t.Fatalf("renderTodoList failed: %v", err)
 	}
-	
+
 	resultStr := string(result)
-	
+
 	// Check that pending items have empty checkbox
 	if !strings.Contains(resultStr, "☐") {
 		t.Error("Should contain pending checkbox ☐")
 	}
-	
+
 	// Check that in_progress items have hourglass
 	if !strings.Contains(resultStr, "⏳") {
 		t.Error("Should contain in_progress checkbox ⏳")
 	}
-	
+
 	// Check that completed items have checkmark
 	if !strings.Contains(resultStr, "✓") {
 		t.Error("Should contain completed checkbox ✓")
 	}
-	
+
 	// Check that completed items have strikethrough
 	if !strings.Contains(resultStr, "line-through") {
 		t.Error("Should contain line-through styling for completed items")

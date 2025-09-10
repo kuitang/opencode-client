@@ -17,11 +17,16 @@ func convertToMessagePart(enhanced EnhancedMessagePart) MessagePart {
 		Tool:      enhanced.Tool,
 		CallID:    enhanced.CallID,
 		State:     enhanced.State,
-		Time:      enhanced.Time,
+		// Convert string time fields to int64 (if needed, can be 0 for test purposes)
+		Time: struct {
+			Start int64 `json:"start,omitempty"`
+			End   int64 `json:"end,omitempty"`
+		}{
+			Start: 0, // Test data doesn't need real timestamps
+			End:   0,
+		},
 	}
 }
-
-
 
 func formatValue(v interface{}) string {
 	switch val := v.(type) {
@@ -71,7 +76,7 @@ func intToString(n int) string {
 	if n < 0 {
 		return "-" + intToString(-n)
 	}
-	
+
 	var result string
 	for n > 0 {
 		digit := byte('0' + (n % 10))
@@ -93,7 +98,7 @@ func TestTransformTextPart(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	
+
 	part := EnhancedMessagePart{
 		ID:        "prt_001",
 		MessageID: "msg_001",
@@ -101,21 +106,21 @@ func TestTransformTextPart(t *testing.T) {
 		Type:      "text",
 		Text:      "Hello **world**! Check out https://example.com",
 	}
-	
+
 	result := transformMessagePart(templates, convertToMessagePart(part))
-	
+
 	if result.Type != "text" {
 		t.Errorf("Expected type 'text', got %s", result.Type)
 	}
-	
+
 	if result.Content != part.Text {
 		t.Errorf("Expected content %q, got %q", part.Text, result.Content)
 	}
-	
+
 	if result.PartID != "prt_001" {
 		t.Errorf("Expected part ID 'prt_001', got %s", result.PartID)
 	}
-	
+
 	// Check that markdown and autolink were applied
 	htmlStr := string(result.RenderedHTML)
 	if !strings.Contains(htmlStr, "<strong>world</strong>") {
@@ -131,7 +136,7 @@ func TestTransformToolPart(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	
+
 	part := EnhancedMessagePart{
 		ID:        "prt_002",
 		MessageID: "msg_001",
@@ -146,21 +151,21 @@ func TestTransformToolPart(t *testing.T) {
 			"output": "total 24\ndrwxr-xr-x  3 user user 4096 Jan 1 00:00 .",
 		},
 	}
-	
+
 	result := transformMessagePart(templates, convertToMessagePart(part))
-	
+
 	if result.Type != "tool" {
 		t.Errorf("Expected type 'tool', got %s", result.Type)
 	}
-	
+
 	if !strings.Contains(result.Content, "bash") {
 		t.Errorf("Expected tool name in content, got %s", result.Content)
 	}
-	
+
 	if !strings.Contains(result.Content, "completed") {
 		t.Errorf("Expected status in content, got %s", result.Content)
 	}
-	
+
 	// Check HTML rendering
 	htmlStr := string(result.RenderedHTML)
 	if !strings.Contains(htmlStr, "bash") {
@@ -173,9 +178,9 @@ func TestTransformTodoWritePart(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	
+
 	todoJSON := `[{"content":"Task 1","status":"completed"},{"content":"Task 2","status":"pending"}]`
-	
+
 	part := EnhancedMessagePart{
 		ID:        "prt_003",
 		MessageID: "msg_001",
@@ -188,13 +193,13 @@ func TestTransformTodoWritePart(t *testing.T) {
 			"output": todoJSON,
 		},
 	}
-	
+
 	result := transformMessagePart(templates, convertToMessagePart(part))
-	
+
 	if result.Type != "tool" {
 		t.Errorf("Expected type 'tool', got %s", result.Type)
 	}
-	
+
 	// Check that todo list was rendered
 	htmlStr := string(result.RenderedHTML)
 	if !strings.Contains(htmlStr, "Task 1") {
@@ -210,7 +215,7 @@ func TestTransformReasoningPart(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	
+
 	part := EnhancedMessagePart{
 		ID:        "prt_004",
 		MessageID: "msg_001",
@@ -218,17 +223,17 @@ func TestTransformReasoningPart(t *testing.T) {
 		Type:      "reasoning",
 		Text:      "I need to analyze this problem step by step...",
 	}
-	
+
 	result := transformMessagePart(templates, convertToMessagePart(part))
-	
+
 	if result.Type != "reasoning" {
 		t.Errorf("Expected type 'reasoning', got %s", result.Type)
 	}
-	
+
 	if !strings.Contains(result.Content, "🤔") {
 		t.Errorf("Expected reasoning emoji, got %s", result.Content)
 	}
-	
+
 	if !strings.Contains(result.Content, part.Text) {
 		t.Errorf("Expected reasoning text, got %s", result.Content)
 	}
@@ -239,7 +244,7 @@ func TestTransformStepParts(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	
+
 	// Test step-start
 	startPart := EnhancedMessagePart{
 		ID:        "prt_005",
@@ -247,23 +252,23 @@ func TestTransformStepParts(t *testing.T) {
 		SessionID: "ses_001",
 		Type:      "step-start",
 	}
-	
+
 	startResult := transformMessagePart(templates, convertToMessagePart(startPart))
-	
+
 	if startResult.Type != "step-start" {
 		t.Errorf("Expected type 'step-start', got %s", startResult.Type)
 	}
-	
+
 	if !strings.Contains(startResult.Content, "▶️") {
 		t.Errorf("Expected step-start emoji, got %s", startResult.Content)
 	}
-	
+
 	// Check HTML badge
 	htmlStr := string(startResult.RenderedHTML)
 	if !strings.Contains(htmlStr, "bg-yellow-100") {
 		t.Errorf("Expected yellow badge styling, got %s", htmlStr)
 	}
-	
+
 	// Test step-finish
 	finishPart := EnhancedMessagePart{
 		ID:        "prt_006",
@@ -271,17 +276,17 @@ func TestTransformStepParts(t *testing.T) {
 		SessionID: "ses_001",
 		Type:      "step-finish",
 	}
-	
+
 	finishResult := transformMessagePart(templates, convertToMessagePart(finishPart))
-	
+
 	if finishResult.Type != "step-finish" {
 		t.Errorf("Expected type 'step-finish', got %s", finishResult.Type)
 	}
-	
+
 	if !strings.Contains(finishResult.Content, "✅") {
 		t.Errorf("Expected step-finish emoji, got %s", finishResult.Content)
 	}
-	
+
 	// Check HTML badge
 	htmlStr = string(finishResult.RenderedHTML)
 	if !strings.Contains(htmlStr, "bg-green-100") {
@@ -294,14 +299,14 @@ func TestTransformMessageWithAllParts(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	
+
 	message := EnhancedMessageResponse{}
 	message.Info.ID = "msg_001"
 	message.Info.Role = "assistant"
 	message.Info.SessionID = "ses_001"
 	message.Info.ProviderID = "openai"
 	message.Info.ModelID = "gpt-4"
-	
+
 	message.Parts = []EnhancedMessagePart{
 		{
 			ID:   "prt_001",
@@ -339,24 +344,24 @@ func TestTransformMessageWithAllParts(t *testing.T) {
 			Type: "step-finish",
 		},
 	}
-	
+
 	// Transform all parts
 	var transformedParts []MessagePartData
 	for _, part := range message.Parts {
 		transformedParts = append(transformedParts, transformMessagePart(templates, convertToMessagePart(part)))
 	}
-	
+
 	// Verify we have all parts
 	if len(transformedParts) != 6 {
 		t.Errorf("Expected 6 parts, got %d", len(transformedParts))
 	}
-	
+
 	// Check each part type is present
 	typeCount := make(map[string]int)
 	for _, part := range transformedParts {
 		typeCount[part.Type]++
 	}
-	
+
 	if typeCount["text"] != 2 {
 		t.Errorf("Expected 2 text parts, got %d", typeCount["text"])
 	}

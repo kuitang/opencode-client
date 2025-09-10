@@ -109,7 +109,7 @@ func countOpencodeProcesses() int {
 	if err != nil {
 		return 0
 	}
-	
+
 	count := 0
 	fmt.Sscanf(string(output), "%d", &count)
 	return count
@@ -173,7 +173,7 @@ func GetTestProviders() []Provider {
 			Name: "Anthropic",
 			Models: map[string]Model{
 				"claude-3-5-haiku-20241022": {ID: "claude-3-5-haiku-20241022", Name: "Claude 3.5 Haiku"},
-				"claude-3-opus":     {ID: "claude-3-opus", Name: "Claude 3 Opus"},
+				"claude-3-opus":             {ID: "claude-3-opus", Name: "Claude 3 Opus"},
 			},
 		},
 		{

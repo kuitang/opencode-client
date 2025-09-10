@@ -6,11 +6,10 @@ import (
 	"testing"
 )
 
-
 func TestHTMLEscapingInTemplates(t *testing.T) {
 	// Test that Go templates auto-escape HTML in {{.Content}}
 	tmpl := template.Must(template.New("test").Parse(`<div>{{.Content}}</div>`))
-	
+
 	tests := []struct {
 		name     string
 		input    string
@@ -67,7 +66,7 @@ func TestHTMLEscapingInTemplates(t *testing.T) {
 			expected: "<div>&lt;form action=&#39;javascript:alert(1)&#39;&gt;&lt;input&gt;&lt;/form&gt;</div>",
 		},
 	}
-	
+
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			var buf strings.Builder
@@ -76,10 +75,10 @@ func TestHTMLEscapingInTemplates(t *testing.T) {
 			if err != nil {
 				t.Fatalf("Template execution failed: %v", err)
 			}
-			
+
 			result := buf.String()
 			if result != tt.expected {
-				t.Errorf("Template escaping failed\nInput:    %q\nGot:      %q\nExpected: %q", 
+				t.Errorf("Template escaping failed\nInput:    %q\nGot:      %q\nExpected: %q",
 					tt.input, result, tt.expected)
 			}
 		})
@@ -90,7 +89,7 @@ func TestNewlinePreservation(t *testing.T) {
 	// Test that preserve-breaks CSS preserves newlines
 	tmpl := template.Must(template.New("test").Parse(
 		`<div class="preserve-breaks">{{.}}</div>`))
-	
+
 	tests := []struct {
 		name     string
 		input    string
@@ -146,7 +145,7 @@ func TestNewlinePreservation(t *testing.T) {
 			},
 		},
 	}
-	
+
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			var buf strings.Builder
@@ -154,18 +153,17 @@ func TestNewlinePreservation(t *testing.T) {
 			if err != nil {
 				t.Fatalf("Template execution failed: %v", err)
 			}
-			
+
 			result := buf.String()
 			for _, expected := range tt.contains {
 				if !strings.Contains(result, expected) {
-					t.Errorf("Output missing expected content\nInput:    %q\nExpected to contain: %q\nGot:      %q", 
+					t.Errorf("Output missing expected content\nInput:    %q\nExpected to contain: %q\nGot:      %q",
 						tt.input, expected, result)
 				}
 			}
 		})
 	}
 }
-
 
 func TestMessagePartDataSecurity(t *testing.T) {
 	// Test that MessagePartData correctly handles malicious content
@@ -205,21 +203,21 @@ func TestMessagePartDataSecurity(t *testing.T) {
 			description: "File content should remain unchanged, template will escape",
 		},
 	}
-	
+
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			part := MessagePartData{
-				Type:       tt.partType,
-				Content:    tt.content,
+				Type:    tt.partType,
+				Content: tt.content,
 				// IsMarkdown field removed in unified renderer
 			}
-			
+
 			// Verify Content field is unchanged (not pre-escaped)
 			if part.Content != tt.content {
-				t.Errorf("Content field was modified\nOriginal: %q\nGot:      %q", 
+				t.Errorf("Content field was modified\nOriginal: %q\nGot:      %q",
 					tt.content, part.Content)
 			}
-			
+
 			// For text type with markdown, verify RenderedHTML is set
 			if tt.partType == "text" && tt.isMarkdown {
 				part.RenderedHTML = renderText(tt.content)

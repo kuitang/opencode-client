@@ -5,6 +5,7 @@ import (
 	"log"
 	"net/http"
 	"net/http/httptest"
+	"os"
 	"strings"
 	"testing"
 )
@@ -51,12 +52,15 @@ func TestLoggingResponseWriter_Write(t *testing.T) {
 func TestLoggingResponseWriter_LogResponse(t *testing.T) {
 	var logOutput bytes.Buffer
 	log.SetOutput(&logOutput)
-	defer log.SetOutput(nil) // Reset to default
+	defer log.SetOutput(os.Stderr) // Restore default stderr output
 
 	recorder := httptest.NewRecorder()
 	lw := NewLoggingResponseWriter(recorder)
 	lw.WriteHeader(200)
-	lw.Write([]byte("<html><body>Test Response</body></html>"))
+	_, err := lw.Write([]byte("<html><body>Test Response</body></html>"))
+	if err != nil {
+		t.Fatalf("Failed to write to logging response writer: %v", err)
+	}
 
 	lw.LogResponse("GET", "/test")
 
@@ -72,14 +76,17 @@ func TestLoggingResponseWriter_LogResponse(t *testing.T) {
 func TestLoggingResponseWriter_LogResponseNoTruncation(t *testing.T) {
 	var logOutput bytes.Buffer
 	log.SetOutput(&logOutput)
-	defer log.SetOutput(nil)
+	defer log.SetOutput(os.Stderr)
 
 	recorder := httptest.NewRecorder()
 	lw := NewLoggingResponseWriter(recorder)
 
 	// Create a large response body (>500 characters)
 	largeBody := strings.Repeat("A", 1000)
-	lw.Write([]byte(largeBody))
+	_, err := lw.Write([]byte(largeBody))
+	if err != nil {
+		t.Fatalf("Failed to write large body: %v", err)
+	}
 
 	lw.LogResponse("POST", "/large")
 
@@ -95,7 +102,7 @@ func TestLoggingResponseWriter_LogResponseNoTruncation(t *testing.T) {
 func TestLoggingMiddleware_NormalEndpoint(t *testing.T) {
 	var logOutput bytes.Buffer
 	log.SetOutput(&logOutput)
-	defer log.SetOutput(nil)
+	defer log.SetOutput(os.Stderr)
 
 	// Create a simple handler that writes a response
 	handler := func(w http.ResponseWriter, r *http.Request) {
@@ -112,7 +119,7 @@ func TestLoggingMiddleware_NormalEndpoint(t *testing.T) {
 				log.Printf("WIRE_OUT SSE connection ended: %s %s", r.Method, r.URL.Path)
 				return
 			}
-			
+
 			lw := NewLoggingResponseWriter(w)
 			handler(lw, r)
 			lw.LogResponse(r.Method, r.URL.Path)
@@ -143,7 +150,7 @@ func TestLoggingMiddleware_NormalEndpoint(t *testing.T) {
 func TestLoggingMiddleware_SSEEndpoint(t *testing.T) {
 	var logOutput bytes.Buffer
 	log.SetOutput(&logOutput)
-	defer log.SetOutput(nil)
+	defer log.SetOutput(os.Stderr)
 
 	// Create an SSE handler
 	handler := func(w http.ResponseWriter, r *http.Request) {
@@ -161,7 +168,7 @@ func TestLoggingMiddleware_SSEEndpoint(t *testing.T) {
 				log.Printf("WIRE_OUT SSE connection ended: %s %s", r.Method, r.URL.Path)
 				return
 			}
-			
+
 			lw := NewLoggingResponseWriter(w)
 			handler(lw, r)
 			lw.LogResponse(r.Method, r.URL.Path)

@@ -11,8 +11,8 @@ type EnhancedMessagePart struct {
 	CallID    string                 `json:"callID,omitempty"`
 	State     map[string]interface{} `json:"state,omitempty"`
 	Time      struct {
-		Start string `json:"start,omitempty"`
-		End   string `json:"end,omitempty"`
+		Start int64 `json:"start,omitempty"`
+		End   int64 `json:"end,omitempty"`
 	} `json:"time,omitempty"`
 }
 

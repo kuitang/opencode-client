@@ -27,7 +27,7 @@
     </div>
     
     <div class="bg-white border-t border-gray-200 p-4">
-        <form id="message-form" hx-target="#messages" hx-swap="beforeend" hx-on::after-request="this.reset(); document.getElementById('message-input').style.height = 'auto';">
+        <form id="message-form" hx-target="#messages" hx-swap="beforeend" hx-on::after-request="document.getElementById('message-input').value=''; document.getElementById('message-input').style.height='auto';">
             <div class="flex gap-2 items-end">
                 <textarea id="message-input" 
                           name="message" 
@@ -56,6 +56,7 @@
                             hx-trigger="change" 
                             hx-target="#model" 
                             hx-swap="innerHTML"
+                            hx-include="#provider"
                             class="px-2 py-1 border border-gray-300 rounded bg-white text-sm focus:outline-none focus:ring-2 focus:ring-gray-400">
                         {{range .Providers}}
                         <option value="{{.ID}}" {{if eq $.DefaultProvider .ID}}selected{{end}}>{{.Name}}</option>

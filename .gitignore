@@ -32,5 +32,9 @@ build/
 .DS_Store
 Thumbs.db
 
-# Playwright MCP artifacts
-.playwright-mcp/
+*.json
+*.txt
+.gocache/*
+.playwright-mcp/*
+.server.pid
+coverage.out
