@@ -110,7 +110,7 @@ To run Playwright tests:
 
 ```bash
 # 1. Start the server
-go build -o vibecoding-chat *.go && ./vibecoding-chat -port 8080
+go build -o opencode-chat *.go && ./opencode-chat -port 8080
 
 # 2. Run tests with Playwright (requires Playwright installed)
 # Either use Playwright directly or Claude Code's Playwright MCP:

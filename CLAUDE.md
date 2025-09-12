@@ -110,7 +110,7 @@ To run Playwright tests with Claude Code's Playwright MCP:
 
 ```bash
 # 1. Build and start the server
-go build -o vibecoding-chat *.go && ./vibecoding-chat -port 8080
+go build -o opencode-chat *.go && ./opencode-chat -port 8080
 
 # 2. In Claude Code with Playwright MCP enabled:
 # - Navigate to http://localhost:8080

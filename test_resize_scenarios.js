@@ -410,7 +410,7 @@ Playwright MCP Test Suite for Resize & Scroll
 ==============================================
 
 To run these tests:
-1. Start the server: ./vibecoding-chat -port 8080
+1. Start the server: ./opencode-chat -port 8080
 2. Navigate to http://localhost:8080 with Playwright
 3. Execute the test functions via page.evaluate()
 
