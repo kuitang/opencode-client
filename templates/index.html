@@ -50,7 +50,7 @@
             
             <!-- Chat Input -->
             <div class="bg-white border-t border-gray-200 p-4">
-                <form id="message-form" hx-post="/send" hx-target="#messages" hx-swap="beforeend scroll:bottom" hx-on::after-request="document.getElementById('message-input').value=''; document.getElementById('message-input').style.height='auto'; this.querySelector('button[type=submit]').disabled = false;" hx-on::before-request="this.querySelector('button[type=submit]').disabled = true;">
+                <form id="message-form" hx-post="/send" hx-target="#messages" hx-swap="beforeend scroll:bottom" hx-disabled-elt="find button[type='submit'], find textarea" hx-on::after-request="document.getElementById('message-input').value=''; document.getElementById('message-input').style.height='auto';">
                     <div class="flex gap-2 items-end">
                         <textarea id="message-input" 
                                   name="message" 
