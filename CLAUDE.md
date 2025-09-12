@@ -92,6 +92,36 @@ This is a **web-based chat interface for OpenCode** built with Go, HTMX 2, and S
 
 ## Testing Guidelines
 
+### Go Tests
+
 All tests use dynamic port allocation (`GetTestPort()`) to avoid conflicts. Integration tests properly wait for OpenCode readiness using polling instead of fixed sleeps. The `StartTestServer()` helper handles the full OpenCode startup sequence for integration tests.
 
 Critical for testing: OpenCode subprocess must be properly cleaned up in test cleanup to prevent orphaned processes. Use `defer server.stopOpencodeServer()` in all integration tests.
+
+### Playwright UI Tests
+
+The repository includes comprehensive Playwright tests for UI stability and scroll preservation in `test_resize_scenarios.js`. These tests ensure:
+- **Scroll position preservation** across viewport transitions (mobile ↔ desktop)
+- **Resize debouncing** prevents UI flickering during rapid viewport changes
+- **Input protection** prevents data loss when clicking outside chat with active text
+- **Race condition handling** during simultaneous scrolling, resizing, and clicking
+
+To run Playwright tests with Claude Code's Playwright MCP:
+
+```bash
+# 1. Build and start the server
+go build -o vibecoding-chat *.go && ./vibecoding-chat -port 8080
+
+# 2. In Claude Code with Playwright MCP enabled:
+# - Navigate to http://localhost:8080
+# - Execute test functions via page.evaluate() from test_resize_scenarios.js
+
+# 3. Run all tests:
+# Copy the test functions into page.evaluate() or run:
+# - testScrollPositionPreservation() - CRITICAL: Tests scroll preservation
+# - testRapidResizeTransitions() - Tests debouncing mechanism
+# - testComplexInteractions() - Tests race conditions
+# - testScrollPreservationWithToggle() - Tests mobile toggle scroll preservation
+```
+
+The test suite validates all critical UI edge cases identified in `docs/002-ui-code-review.md`.

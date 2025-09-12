@@ -21,7 +21,7 @@ import (
 	"time"
 )
 
-//go:embed templates/*.html
+//go:embed templates/*.html templates/tabs/*.html
 var templateFS embed.FS
 
 //go:embed static/*
@@ -150,7 +150,7 @@ func main() {
 	funcMap := template.FuncMap{
 		"add": func(a, b int) int { return a + b },
 	}
-	server.templates, err = template.New("").Funcs(funcMap).ParseFS(templateFS, "templates/*.html")
+	server.templates, err = template.New("").Funcs(funcMap).ParseFS(templateFS, "templates/*.html", "templates/tabs/*.html")
 	if err != nil {
 		log.Fatalf("Failed to parse templates: %v", err)
 	}
@@ -210,6 +210,10 @@ func main() {
 	http.HandleFunc("/events", loggingMiddleware(server.handleSSE))
 	http.HandleFunc("/clear", loggingMiddleware(server.handleClear))
 	http.HandleFunc("/models", loggingMiddleware(server.handleModels))
+	// Tab routes
+	http.HandleFunc("/tab/preview", loggingMiddleware(server.handleTabPreview))
+	http.HandleFunc("/tab/code", loggingMiddleware(server.handleTabCode))
+	http.HandleFunc("/tab/deployment", loggingMiddleware(server.handleTabDeployment))
 	http.Handle("/static/", http.FileServer(http.FS(staticFS)))
 
 	// Set up signal handling for graceful shutdown
@@ -963,4 +967,29 @@ func min(a, b int) int {
 		return a
 	}
 	return b
+}
+
+// Tab handler functions for HTMX requests
+func (s *Server) handleTabPreview(w http.ResponseWriter, r *http.Request) {
+	w.Header().Set("Content-Type", "text/html")
+	if err := s.templates.ExecuteTemplate(w, "tab-preview", nil); err != nil {
+		http.Error(w, "Template error", http.StatusInternalServerError)
+		log.Printf("Tab preview template error: %v", err)
+	}
+}
+
+func (s *Server) handleTabCode(w http.ResponseWriter, r *http.Request) {
+	w.Header().Set("Content-Type", "text/html")
+	if err := s.templates.ExecuteTemplate(w, "tab-code", nil); err != nil {
+		http.Error(w, "Template error", http.StatusInternalServerError)
+		log.Printf("Tab code template error: %v", err)
+	}
+}
+
+func (s *Server) handleTabDeployment(w http.ResponseWriter, r *http.Request) {
+	w.Header().Set("Content-Type", "text/html")
+	if err := s.templates.ExecuteTemplate(w, "tab-deployment", nil); err != nil {
+		http.Error(w, "Template error", http.StatusInternalServerError)
+		log.Printf("Tab deployment template error: %v", err)
+	}
 }

@@ -19,6 +19,91 @@
     }
 }
 
+/* Unified Chat Responsive States */
+.chat-responsive {
+    /* Desktop: Always visible sidebar - no special states needed */
+}
+
+/* Mobile Chat States */
+@media (max-width: 1023px) {
+    /* Ensure chat sticks to viewport bottom */
+    .chat-responsive {
+        position: fixed !important;
+        bottom: 0 !important;
+        left: 0 !important;
+        right: 0 !important;
+        z-index: 50 !important;
+    }
+    
+    .chat-minimized {
+        height: 64px; /* Only header height */
+        overflow: hidden; /* Hide all content except header */
+    }
+    
+    .chat-minimized #messages,
+    .chat-minimized #message-form {
+        visibility: hidden; /* Hide but preserve layout space */
+        height: 0; /* Collapse height when hidden */
+        overflow: hidden;
+    }
+    
+    .chat-expanded {
+        height: 80vh; /* Take up 80% of viewport height */
+        bottom: 0; /* Stick to viewport bottom */
+        overflow: visible; /* Show all content when expanded */
+        display: flex;
+        flex-direction: column;
+    }
+    
+    .chat-expanded #messages {
+        visibility: visible;
+        height: auto;
+        flex: 1; /* Take available space */
+        min-height: 0; /* Allow shrinking */
+        overflow-y: auto;
+    }
+    
+    .chat-expanded #message-form {
+        visibility: visible;
+        height: auto;
+        position: sticky; /* Keep form always visible at bottom */
+        bottom: 0;
+        background: white;
+        border-top: 1px solid #e5e7eb;
+        flex-shrink: 0; /* Don't shrink the form */
+    }
+    
+    /* Rotate chevron icon when expanded (now points down when expanded) */
+    .chat-expanded #chat-toggle svg {
+        transform: rotate(180deg);
+    }
+}
+
+/* Tab Button Active State */
+.tab-button.active {
+    color: #2563eb; /* text-blue-600 */
+    border-bottom: 2px solid #2563eb; /* border-blue-600 */
+}
+
+.tab-button:not(.active) {
+    color: #6b7280; /* text-gray-500 */
+    border-bottom: 2px solid transparent;
+}
+
+.tab-button:not(.active):hover {
+    color: #374151; /* text-gray-700 */
+}
+
+/* Smooth transitions for all interactive elements */
+.tab-button {
+    transition: color 0.2s ease-in-out, border-color 0.2s ease-in-out;
+}
+
+/* Chat toggle icon transition */
+#chat-toggle svg {
+    transition: transform 0.3s ease-in-out;
+}
+
 /* Only preserve line breaks for plain text without markdown */
 .preserve-breaks {
     white-space: pre-line; /* Preserves line breaks, collapses spaces */

@@ -75,6 +75,8 @@ go build -o opencode-chat
 
 ## Testing
 
+### Go Tests
+
 ```bash
 # Run all tests
 go test -v
@@ -93,6 +95,33 @@ curl -c cookies.txt http://localhost:8080/
 curl -X POST http://localhost:8080/send \
   -b cookies.txt \
   -d "message=Hello&provider=anthropic&model=claude-3-5-sonnet"
+```
+
+### Playwright UI Tests
+
+The project includes comprehensive Playwright tests in `test_resize_scenarios.js` for validating UI stability, scroll preservation, and responsive behavior. These tests cover:
+
+- **Scroll Position Preservation**: Ensures scroll positions are maintained across mobile/desktop transitions
+- **Resize Debouncing**: Validates that rapid viewport changes don't cause UI flickering
+- **Input Protection**: Verifies chat doesn't minimize when user has active text input
+- **Race Condition Handling**: Tests complex interactions like scrolling while resizing
+
+To run Playwright tests:
+
+```bash
+# 1. Start the server
+go build -o vibecoding-chat *.go && ./vibecoding-chat -port 8080
+
+# 2. Run tests with Playwright (requires Playwright installed)
+# Either use Playwright directly or Claude Code's Playwright MCP:
+# - Navigate to http://localhost:8080
+# - Execute test functions from test_resize_scenarios.js
+
+# Key test functions:
+# - testScrollPositionPreservation() - Critical scroll preservation test
+# - testRapidResizeTransitions() - Tests debounce mechanism
+# - testComplexInteractions() - Tests race conditions
+# - runAllTests() - Runs complete test suite
 ```
 
 ## Design Decisions

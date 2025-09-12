@@ -1,5 +1,7 @@
 # Binaries
 opencode-chat
+vibecoding-chat
+*-chat
 opencode-chat.test
 *.test
 
@@ -36,5 +38,6 @@ Thumbs.db
 *.txt
 .gocache/*
 .playwright-mcp/*
+.server_pid
 .server.pid
 coverage.out
