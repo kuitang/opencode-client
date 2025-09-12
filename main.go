@@ -15,6 +15,7 @@ import (
 	"os/exec"
 	"os/signal"
 	"path/filepath"
+	"sort"
 	"strings"
 	"sync"
 	"syscall"
@@ -52,6 +53,11 @@ type Model struct {
 type ProvidersResponse struct {
 	Providers []Provider        `json:"providers"`
 	Default   map[string]string `json:"default"`
+}
+
+type ModelOption struct {
+	Value string // provider/model format
+	Label string // Display name
 }
 
 type SessionResponse struct {
@@ -209,7 +215,6 @@ func main() {
 	http.HandleFunc("/send", loggingMiddleware(server.handleSend))
 	http.HandleFunc("/events", loggingMiddleware(server.handleSSE))
 	http.HandleFunc("/clear", loggingMiddleware(server.handleClear))
-	http.HandleFunc("/models", loggingMiddleware(server.handleModels))
 	// Tab routes
 	http.HandleFunc("/tab/preview", loggingMiddleware(server.handleTabPreview))
 	http.HandleFunc("/tab/code", loggingMiddleware(server.handleTabCode))
@@ -437,6 +442,27 @@ func (s *Server) loadProviders() error {
 	return nil
 }
 
+// getAllModels returns a sorted list of all available models
+func (s *Server) getAllModels() []ModelOption {
+	var models []ModelOption
+	
+	for _, provider := range s.providers {
+		for _, model := range provider.Models {
+			models = append(models, ModelOption{
+				Value: fmt.Sprintf("%s/%s", provider.ID, model.ID),
+				Label: fmt.Sprintf("%s - %s", provider.Name, model.Name),
+			})
+		}
+	}
+	
+	// Sort alphabetically by value (provider/model)
+	sort.Slice(models, func(i, j int) bool {
+		return models[i].Value < models[j].Value
+	})
+	
+	return models
+}
+
 func (s *Server) getOrCreateSession(cookie string) (string, error) {
 	// First check (with read lock)
 	s.mu.RLock()
@@ -507,41 +533,16 @@ func (s *Server) handleIndex(w http.ResponseWriter, r *http.Request) {
 	// Get existing messages
 	messagesHTML := s.getMessagesHTML(sessionID)
 
-	// Get default provider
-	defaultProvider := "anthropic"
-	if len(s.providers) > 0 {
-		for _, p := range s.providers {
-			if p.ID == "anthropic" {
-				defaultProvider = "anthropic"
-				break
-			}
-		}
-	}
-
-	// Get models for default provider
-	var defaultModels []Model
-	for _, p := range s.providers {
-		if p.ID == defaultProvider {
-			for _, m := range p.Models {
-				defaultModels = append(defaultModels, m)
-			}
-			break
-		}
-	}
 
 	// Prepare template data
 	data := struct {
-		Providers       []Provider
-		DefaultProvider string
-		DefaultModels   []Model
-		DefaultModel    string
-		MessagesHTML    template.HTML
+		Models       []ModelOption
+		DefaultModel string
+		MessagesHTML template.HTML
 	}{
-		Providers:       s.providers,
-		DefaultProvider: defaultProvider,
-		DefaultModels:   defaultModels,
-		DefaultModel:    s.defaultModel[defaultProvider],
-		MessagesHTML:    template.HTML(messagesHTML),
+		Models:       s.getAllModels(),
+		DefaultModel: "anthropic/claude-sonnet-4-20250514", // Default to Claude Sonnet 4
+		MessagesHTML: template.HTML(messagesHTML),
 	}
 
 	w.Header().Set("Content-Type", "text/html")
@@ -576,8 +577,16 @@ func (s *Server) handleSend(w http.ResponseWriter, r *http.Request) {
 	log.Printf("handleSend: using session %s", sessionID)
 
 	message := r.FormValue("message")
-	provider := r.FormValue("provider")
-	model := r.FormValue("model")
+	modelValue := r.FormValue("model") // Format: provider/model
+	
+	// Parse provider and model from combined format
+	parts := strings.SplitN(modelValue, "/", 2)
+	if len(parts) != 2 {
+		http.Error(w, "Invalid model format", http.StatusBadRequest)
+		return
+	}
+	provider := parts[0]
+	model := parts[1]
 
 	log.Printf("handleSend: message=%q, provider=%q, model=%q", message, provider, model)
 
@@ -937,30 +946,6 @@ func (s *Server) getMessagesHTML(sessionID string) string {
 	return result
 }
 
-func (s *Server) handleModels(w http.ResponseWriter, r *http.Request) {
-	providerID := r.URL.Query().Get("provider")
-	if providerID == "" {
-		http.Error(w, "Provider required", http.StatusBadRequest)
-		return
-	}
-
-	w.Header().Set("Content-Type", "text/html")
-
-	// Find provider and return options
-	for _, p := range s.providers {
-		if p.ID == providerID {
-			defaultModel := s.defaultModel[providerID]
-			for modelID, model := range p.Models {
-				selected := ""
-				if modelID == defaultModel {
-					selected = "selected"
-				}
-				fmt.Fprintf(w, `<option value="%s" %s>%s</option>`, modelID, selected, model.Name)
-			}
-			return
-		}
-	}
-}
 
 func min(a, b int) int {
 	if a < b {

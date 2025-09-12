@@ -18,7 +18,7 @@
                                           max-lg:fixed max-lg:inset-x-0 max-lg:bottom-0 max-lg:max-h-[80vh] max-lg:border-t max-lg:border-r-0 max-lg:rounded-t-lg max-lg:shadow-lg max-lg:z-50
                                           transform transition-transform duration-300 ease-in-out chat-expanded">
             <!-- Chat Header -->
-            <header class="bg-gray-800 text-white px-4 py-3 flex justify-between items-center">
+            <header class="bg-gray-800 text-white px-4 h-14 flex justify-between items-center">
                 <h1 class="text-lg font-semibold">Chat</h1>
                 <div class="flex items-center gap-2">
                     <!-- Mobile Toggle Handle -->
@@ -73,30 +73,14 @@
                             </svg>
                         </button>
                     </div>
-                    <div class="flex flex-wrap gap-3 items-center mt-3 text-sm lg:text-sm max-lg:text-xs">
-                        <div class="flex items-center gap-2 max-lg:gap-1">
-                            <label for="provider" class="text-gray-600">Provider:</label>
-                            <select id="provider" name="provider" 
-                                    hx-get="/models" 
-                                    hx-trigger="change" 
-                                    hx-target="#model" 
-                                    hx-swap="innerHTML"
-                                    hx-include="#provider"
-                                    class="px-2 py-1 border border-gray-300 rounded bg-white text-sm max-lg:text-xs focus:outline-none focus:ring-2 focus:ring-blue-500 min-h-[44px]">
-                                {{range .Providers}}
-                                <option value="{{.ID}}" {{if eq $.DefaultProvider .ID}}selected{{end}}>{{.Name}}</option>
-                                {{end}}
-                            </select>
-                        </div>
-                        <div class="flex items-center gap-2 max-lg:gap-1">
-                            <label for="model" class="text-gray-600">Model:</label>
-                            <select id="model" name="model"
-                                    class="px-2 py-1 border border-gray-300 rounded bg-white text-sm max-lg:text-xs focus:outline-none focus:ring-2 focus:ring-blue-500 min-h-[44px]">
-                                {{range .DefaultModels}}
-                                <option value="{{.ID}}" {{if eq .ID $.DefaultModel}}selected{{end}}>{{.Name}}</option>
-                                {{end}}
-                            </select>
-                        </div>
+                    <div class="flex items-center gap-2 mt-3 text-sm lg:text-sm max-lg:text-xs">
+                        <label for="model" class="text-gray-600">Model:</label>
+                        <select id="model" name="model"
+                                class="px-2 py-1 border border-gray-300 rounded bg-white text-sm max-lg:text-xs focus:outline-none focus:ring-2 focus:ring-blue-500 min-h-[44px] max-w-md">
+                            {{range .Models}}
+                            <option value="{{.Value}}" {{if eq .Value $.DefaultModel}}selected{{end}}>{{.Label}}</option>
+                            {{end}}
+                        </select>
                     </div>
                 </form>
             </div>
@@ -105,23 +89,23 @@
         <!-- Main Content Area - Responsive -->
         <main class="flex-1 flex flex-col lg:flex max-lg:w-full">
             <!-- Tab Navigation -->
-            <nav class="bg-white border-b border-gray-200">
-                <div class="flex lg:flex max-lg:overflow-x-auto">
-                    <button class="px-6 py-3 text-blue-600 border-b-2 border-blue-600 font-medium focus:outline-none min-h-[44px] tab-button active lg:flex-none max-lg:whitespace-nowrap"
+            <nav class="bg-white border-b border-gray-200 h-14">
+                <div class="flex h-full lg:flex max-lg:overflow-x-auto">
+                    <button class="px-6 h-full text-blue-600 border-b-2 border-blue-600 font-medium focus:outline-none tab-button active lg:flex-none max-lg:whitespace-nowrap flex items-center"
                             hx-get="/tab/preview"
                             hx-target="#main-content"
                             hx-swap="innerHTML"
                             onclick="htmx.takeClass(this, 'active')">
                         Preview
                     </button>
-                    <button class="px-6 py-3 text-gray-500 hover:text-gray-700 font-medium focus:outline-none min-h-[44px] tab-button lg:flex-none max-lg:whitespace-nowrap"
+                    <button class="px-6 h-full text-gray-500 hover:text-gray-700 font-medium focus:outline-none tab-button lg:flex-none max-lg:whitespace-nowrap flex items-center"
                             hx-get="/tab/code"
                             hx-target="#main-content"
                             hx-swap="innerHTML"
                             onclick="htmx.takeClass(this, 'active')">
                         Code
                     </button>
-                    <button class="px-6 py-3 text-gray-500 hover:text-gray-700 font-medium focus:outline-none min-h-[44px] tab-button lg:flex-none max-lg:whitespace-nowrap"
+                    <button class="px-6 h-full text-gray-500 hover:text-gray-700 font-medium focus:outline-none tab-button lg:flex-none max-lg:whitespace-nowrap flex items-center"
                             hx-get="/tab/deployment"
                             hx-target="#main-content"
                             hx-swap="innerHTML"

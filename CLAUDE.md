@@ -6,11 +6,11 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ```bash
 # Build and run
-go build -o opencode-chat main.go message_parts.go
+go build -o opencode-chat *.go
 ./opencode-chat -port 8080
 
 # Development with live reload
-go run main.go message_parts.go -port 8080
+go run *.go -port 8080
 
 # Run all tests (organized by prefix)
 go test -v -timeout 60s
@@ -26,7 +26,7 @@ go test -v -run TestServerStartup -timeout 60s
 go test -v -cover -timeout 60s
 
 # Build for deployment
-go build -ldflags="-s -w" -o opencode-chat main.go message_parts.go
+go build -ldflags="-s -w" -o opencode-chat *.go
 ```
 
 ## Architecture Overview

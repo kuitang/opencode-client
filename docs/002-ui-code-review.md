@@ -4,7 +4,7 @@
 
 **Last Updated**: December 2024
 
-### ✅ Fixed Issues (8 of 14 critical issues resolved)
+### ✅ Fixed Issues (9 of 14 critical issues resolved)
 - **Viewport Resize During SSE Streaming** - Added debouncing and scroll preservation
 - **Rapid Mobile Toggle Race Condition** - Added 100ms debounce
 - **Outside Click Auto-Minimize Conflict** - Protected input with text/focus check
@@ -13,9 +13,9 @@
 - **Form Double-Submit Vulnerability** - Added button disable during submission
 - **Resize Debouncing** - Implemented 200ms debounce
 - **SSE Connection Status Feedback** - Added visual flash notifications for connection events
+- **SSE Automatic Reconnection** - Handled by HTMX-SSE extension with exponential backoff
 
-### ⚠️ Still Pending (6 issues)
-- SSE Reconnection Logic (automatic retry still needed)
+### ⚠️ Still Pending (5 issues)
 - Tab Template Responsive Classes
 - Mobile Modal Max-Height Constraint
 - Provider/Model Selection Race Condition
@@ -124,14 +124,16 @@ This code review analyzes the VibeCoding/OpenCode chat interface implementation 
 
 ## 5. HTMX and SSE Integration Risks
 
-### SSE Connection Management 🔌 ✅ PARTIALLY FIXED
+### SSE Connection Management 🔌 ✅ FIXED
 **Issue**: No automatic reconnection when SSE connection drops.
-**STATUS**: ✅ Partially fixed - visual feedback added, auto-reconnect still needed
+**STATUS**: ✅ Fixed - HTMX-SSE extension handles automatic reconnection
 
-- **Location**: `templates/index.html:44-47`, `static/script.js:238-261`
-- **Fixed**: Visual feedback via flash notifications for connection status
-- **Problem**: Automatic reconnection logic still missing
-- **Fix Required**: Implement SSE reconnection with exponential backoff
+- **Location**: `templates/index.html:44-47`, `static/script.js:238-291`
+- **Fixed**: 
+  - Visual feedback via flash notifications for connection status
+  - Automatic reconnection handled by HTMX-SSE extension ([docs](https://github.com/bigskysoftware/htmx-extensions/blob/main/src/sse/README.md#automatic-reconnection))
+  - The SSE extension automatically attempts to reconnect with exponential backoff (1s, 2s, 4s, 8s, up to 64s)
+- **Additional Error Handling**: Added handlers for `htmx:sendError`, `htmx:responseError`, and `htmx:timeout` events
 
 ### Form Double-Submit Vulnerability ✅ FIXED
 **Issue**: No disable state during message submission.
@@ -141,18 +143,23 @@ This code review analyzes the VibeCoding/OpenCode chat interface implementation 
 - **Impact**: Duplicate messages sent to server
 - **Fix Required**: Disable form controls during submission with `hx-indicator`
 
-### Provider/Model Selection Race Condition
-**Issue**: Async model list update could cause stale submissions.
+### Provider/Model Selection ✅ IMPROVED
+**Issue**: Previously async model list could cause race conditions.
+**STATUS**: ✅ Improved - Now uses static server-side populated dropdown
 
-- **Location**: `templates/index.html:81-87`
-- **Scenario**: User changes provider and immediately sends message
-- **Fix Required**: Disable send until model list updates complete
+- **Location**: `templates/index.html:78-84`
+- **Previous Risk**: User could send message with stale provider/model selection
+- **Current Implementation**: Static dropdown populated on page load from OpenCode providers
+- **Remaining Risk**: Model list becomes stale if providers change after page load (requires manual refresh)
 
-### Tab Switching During Streaming
-**Issue**: No protection for DOM updates when switching tabs mid-stream.
+### Tab Switching During Streaming ✅ NO ISSUE  
+**Issue**: Originally concerned about DOM conflicts during streaming.
+**STATUS**: ✅ No Issue - Architecture prevents conflicts
 
-- **Risk**: HTMX could target non-existent elements if tab changes
-- **Fix Required**: Cancel or queue tab switches during active streaming
+- **Analysis**: Chat updates target `#messages`, tab updates target `#main-content`
+- **Safe Design**: SSE streaming and tab switching use separate DOM target domains
+- **Constraint**: DOM mutations are limited to preview content only (no chat window mutations)
+- **Result**: No conflicts possible - chat streaming continues independent of active tab
 
 ## 6. Missing Error Handling
 
@@ -221,7 +228,7 @@ The mobile design document should be updated to include:
 
 ## Conclusion
 
-The implementation generally follows the unified responsive design principles well. Significant progress has been made with 8 of 14 critical issues now resolved, including the recent addition of SSE connection status feedback. The remaining issues primarily involve automatic SSE reconnection, responsive classes for tab templates, and browser navigation handling.
+The implementation generally follows the unified responsive design principles well. Significant progress has been made with 9 of 14 critical issues now resolved, including SSE connection management with automatic reconnection via the HTMX-SSE extension. The remaining issues primarily involve responsive classes for tab templates, mobile constraints, and browser navigation handling.
 
 The codebase would benefit from:
 1. More defensive programming around state transitions
