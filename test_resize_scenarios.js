@@ -365,7 +365,11 @@ async function runAllTests() {
         { name: 'Resize During Active Scrolling', fn: testResizeDuringActiveScrolling },
         { name: 'Complex Interaction Patterns', fn: testComplexInteractions },
         { name: 'Scroll Preservation with Toggle', fn: testScrollPreservationWithToggle },
-        { name: 'Edge Case Screen Sizes', fn: testEdgeCaseScreenSizes }
+        { name: 'Edge Case Screen Sizes', fn: testEdgeCaseScreenSizes },
+        { name: 'Connection Flash Functionality', fn: testConnectionFlashFunctionality },
+        { name: 'Flash During Viewport Transitions', fn: testFlashDuringResize },
+        { name: 'Send Failure Flash', fn: testSendFailureFlash },
+        { name: 'SSE Event Handlers', fn: testSSEEventHandlers }
     ];
     
     const results = [];
@@ -399,8 +403,306 @@ if (typeof module !== 'undefined' && module.exports) {
         testResizeDuringActiveScrolling,
         testComplexInteractions,
         testScrollPreservationWithToggle,
-        testEdgeCaseScreenSizes
+        testEdgeCaseScreenSizes,
+        testConnectionFlashFunctionality,
+        testFlashDuringResize,
+        testSendFailureFlash,
+        testSSEEventHandlers
     };
+}
+
+// Test 7: Connection Flash Functionality
+// Tests the SSE connection status flash UI component
+async function testConnectionFlashFunctionality() {
+    return await page.evaluate(`async () => {
+        const flash = document.getElementById('connection-flash');
+        const flashMessage = document.getElementById('flash-message');
+        const results = [];
+        
+        if (!flash || !flashMessage) {
+            return { error: 'Flash elements not found' };
+        }
+        
+        // Test 1: Show warning flash
+        showFlash('Test warning message', 'warning');
+        await new Promise(resolve => setTimeout(resolve, 100));
+        
+        results.push({
+            test: 'Warning flash',
+            visible: flash.classList.contains('flash-visible'),
+            hasWarningColor: flash.classList.contains('bg-amber-500'),
+            messageText: flashMessage.textContent,
+            passed: flash.classList.contains('flash-visible') && 
+                   flash.classList.contains('bg-amber-500') &&
+                   flashMessage.textContent === 'Test warning message'
+        });
+        
+        // Test 2: Show success flash with auto-hide
+        showFlash('Test success message', 'success', 1000);
+        await new Promise(resolve => setTimeout(resolve, 100));
+        
+        const successVisible = flash.classList.contains('flash-visible');
+        const hasSuccessColor = flash.classList.contains('bg-green-500');
+        
+        // Wait for auto-hide
+        await new Promise(resolve => setTimeout(resolve, 1200));
+        
+        results.push({
+            test: 'Success flash with auto-hide',
+            initiallyVisible: successVisible,
+            hasSuccessColor: hasSuccessColor,
+            hiddenAfterTimeout: flash.classList.contains('flash-hidden') || flash.classList.contains('hidden'),
+            passed: successVisible && hasSuccessColor
+        });
+        
+        // Test 3: Show error flash
+        showFlash('Test error message', 'error');
+        await new Promise(resolve => setTimeout(resolve, 100));
+        
+        results.push({
+            test: 'Error flash',
+            visible: flash.classList.contains('flash-visible'),
+            hasErrorColor: flash.classList.contains('bg-red-500'),
+            messageText: flashMessage.textContent,
+            passed: flash.classList.contains('flash-visible') && 
+                   flash.classList.contains('bg-red-500') &&
+                   flashMessage.textContent === 'Test error message'
+        });
+        
+        // Test 4: Hide flash
+        hideFlash();
+        await new Promise(resolve => setTimeout(resolve, 400));
+        
+        results.push({
+            test: 'Hide flash',
+            hidden: flash.classList.contains('flash-hidden') || flash.classList.contains('hidden'),
+            passed: flash.classList.contains('flash-hidden') || flash.classList.contains('hidden')
+        });
+        
+        return {
+            results: results,
+            allTestsPassed: results.every(r => r.passed)
+        };
+    }`);
+}
+
+// Test 8: Flash During Viewport Transitions
+// Ensures flash works correctly during mobile/desktop transitions
+async function testFlashDuringResize() {
+    return await page.evaluate(`async () => {
+        const flash = document.getElementById('connection-flash');
+        const results = [];
+        
+        // Start in mobile view
+        window.innerWidth = 375;
+        window.dispatchEvent(new Event('resize'));
+        await new Promise(resolve => setTimeout(resolve, 300));
+        
+        // Show flash in mobile
+        showFlash('Mobile connection test', 'warning');
+        await new Promise(resolve => setTimeout(resolve, 100));
+        
+        const mobileFlashVisible = flash.classList.contains('flash-visible');
+        
+        // Resize to desktop while flash is showing
+        window.innerWidth = 1280;
+        window.dispatchEvent(new Event('resize'));
+        await new Promise(resolve => setTimeout(resolve, 300));
+        
+        const desktopFlashStillVisible = flash.classList.contains('flash-visible');
+        
+        results.push({
+            test: 'Flash persistence during resize',
+            mobileVisible: mobileFlashVisible,
+            desktopVisible: desktopFlashStillVisible,
+            passed: mobileFlashVisible && desktopFlashStillVisible
+        });
+        
+        // Test flash in desktop view
+        hideFlash();
+        await new Promise(resolve => setTimeout(resolve, 400));
+        
+        showFlash('Desktop connection test', 'success', 1000);
+        await new Promise(resolve => setTimeout(resolve, 100));
+        
+        const desktopFlashVisible = flash.classList.contains('flash-visible');
+        
+        // Resize back to mobile
+        window.innerWidth = 375;
+        window.dispatchEvent(new Event('resize'));
+        await new Promise(resolve => setTimeout(resolve, 300));
+        
+        const mobileFlashStillVisible = flash.classList.contains('flash-visible');
+        
+        results.push({
+            test: 'Flash persistence during desktop to mobile',
+            desktopVisible: desktopFlashVisible,
+            mobileVisible: mobileFlashStillVisible,
+            passed: desktopFlashVisible && mobileFlashStillVisible
+        });
+        
+        return {
+            results: results,
+            allTestsPassed: results.every(r => r.passed)
+        };
+    }`);
+}
+
+// Test 9: Send Failure Flash Functionality
+// Tests HTMX send error event handlers
+async function testSendFailureFlash() {
+    return await page.evaluate(`async () => {
+        const flash = document.getElementById('connection-flash');
+        const results = [];
+        
+        // Test htmx:sendError event
+        const sendErrorEvent = new CustomEvent('htmx:sendError', {
+            detail: { error: 'Network error' }
+        });
+        
+        document.body.dispatchEvent(sendErrorEvent);
+        await new Promise(resolve => setTimeout(resolve, 100));
+        
+        results.push({
+            test: 'Send Error handling',
+            flashVisible: flash.classList.contains('flash-visible'),
+            hasErrorColor: flash.classList.contains('bg-red-500'),
+            messageContainsConnection: document.getElementById('flash-message').textContent.includes('connection'),
+            messageText: document.getElementById('flash-message').textContent,
+            passed: flash.classList.contains('flash-visible') && 
+                   flash.classList.contains('bg-red-500') &&
+                   document.getElementById('flash-message').textContent.includes('Failed to send')
+        });
+        
+        // Test htmx:responseError with 500 status
+        const responseErrorEvent = new CustomEvent('htmx:responseError', {
+            detail: { xhr: { status: 500 } }
+        });
+        
+        document.body.dispatchEvent(responseErrorEvent);
+        await new Promise(resolve => setTimeout(resolve, 100));
+        
+        results.push({
+            test: 'Response Error 500 handling',
+            flashVisible: flash.classList.contains('flash-visible'),
+            hasErrorColor: flash.classList.contains('bg-red-500'),
+            messageIsServerUnavailable: document.getElementById('flash-message').textContent.includes('Server temporarily unavailable'),
+            messageText: document.getElementById('flash-message').textContent,
+            passed: flash.classList.contains('flash-visible') && 
+                   flash.classList.contains('bg-red-500') &&
+                   document.getElementById('flash-message').textContent.includes('temporarily unavailable')
+        });
+        
+        // Test htmx:responseError with 429 status
+        const rateLimitEvent = new CustomEvent('htmx:responseError', {
+            detail: { xhr: { status: 429 } }
+        });
+        
+        document.body.dispatchEvent(rateLimitEvent);
+        await new Promise(resolve => setTimeout(resolve, 100));
+        
+        results.push({
+            test: 'Rate Limit 429 handling',
+            flashVisible: flash.classList.contains('flash-visible'),
+            hasErrorColor: flash.classList.contains('bg-red-500'),
+            messageIsRateLimit: document.getElementById('flash-message').textContent.includes('Rate limited'),
+            messageText: document.getElementById('flash-message').textContent,
+            passed: flash.classList.contains('flash-visible') && 
+                   flash.classList.contains('bg-red-500') &&
+                   document.getElementById('flash-message').textContent.includes('Rate limited')
+        });
+        
+        // Test htmx:timeout
+        const timeoutEvent = new CustomEvent('htmx:timeout', {
+            detail: { timeout: true }
+        });
+        
+        document.body.dispatchEvent(timeoutEvent);
+        await new Promise(resolve => setTimeout(resolve, 100));
+        
+        results.push({
+            test: 'Timeout handling',
+            flashVisible: flash.classList.contains('flash-visible'),
+            hasWarningColor: flash.classList.contains('bg-amber-500'),
+            messageIsTimeout: document.getElementById('flash-message').textContent.includes('timed out'),
+            messageText: document.getElementById('flash-message').textContent,
+            passed: flash.classList.contains('flash-visible') && 
+                   flash.classList.contains('bg-amber-500') &&
+                   document.getElementById('flash-message').textContent.includes('timed out')
+        });
+        
+        return {
+            results: results,
+            allTestsPassed: results.every(r => r.passed)
+        };
+    }`);
+}
+
+// Test 10: SSE Event Simulation
+// Tests the actual SSE event handlers
+async function testSSEEventHandlers() {
+    return await page.evaluate(`async () => {
+        const flash = document.getElementById('connection-flash');
+        const results = [];
+        
+        // Test SSE Error event
+        const sseErrorEvent = new CustomEvent('htmx:sseError', {
+            detail: { error: 'Connection failed' }
+        });
+        
+        document.body.dispatchEvent(sseErrorEvent);
+        await new Promise(resolve => setTimeout(resolve, 100));
+        
+        results.push({
+            test: 'SSE Error event handling',
+            flashVisible: flash.classList.contains('flash-visible'),
+            hasWarningColor: flash.classList.contains('bg-amber-500'),
+            messageContainsReconnecting: document.getElementById('flash-message').textContent.includes('reconnecting'),
+            passed: flash.classList.contains('flash-visible') && 
+                   flash.classList.contains('bg-amber-500')
+        });
+        
+        // Test SSE Open event
+        const sseOpenEvent = new CustomEvent('htmx:sseOpen', {
+            detail: { source: {} }
+        });
+        
+        document.body.dispatchEvent(sseOpenEvent);
+        await new Promise(resolve => setTimeout(resolve, 100));
+        
+        results.push({
+            test: 'SSE Open event handling',
+            flashVisible: flash.classList.contains('flash-visible'),
+            hasSuccessColor: flash.classList.contains('bg-green-500'),
+            messageIsConnected: document.getElementById('flash-message').textContent === 'Connected',
+            passed: flash.classList.contains('flash-visible') && 
+                   flash.classList.contains('bg-green-500')
+        });
+        
+        // Wait for auto-hide from success message
+        await new Promise(resolve => setTimeout(resolve, 2200));
+        
+        // Test SSE Close event (with message type)
+        const sseCloseEvent = new CustomEvent('htmx:sseClose', {
+            detail: { type: 'message' }
+        });
+        
+        document.body.dispatchEvent(sseCloseEvent);
+        await new Promise(resolve => setTimeout(resolve, 100));
+        
+        results.push({
+            test: 'SSE Close event handling',
+            flashVisible: flash.classList.contains('flash-visible'),
+            hasErrorColor: flash.classList.contains('bg-red-500'),
+            passed: flash.classList.contains('flash-visible') && 
+                   flash.classList.contains('bg-red-500')
+        });
+        
+        return {
+            results: results,
+            allTestsPassed: results.every(r => r.passed)
+        };
+    }`);
 }
 
 // Usage instructions

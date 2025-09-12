@@ -56,7 +56,7 @@ This is a **web-based chat interface for OpenCode** built with Go, HTMX 2, and S
 **SSE Event Filtering**: OpenCode provides a global `/event` endpoint streaming ALL sessions. The client-side filtering happens in `handleSSE()` by parsing each event's `sessionID` and only forwarding relevant events.
 
 **Template Architecture**: Uses `embed.FS` for templates and static files. The `NewServer()` constructor parses templates with helper functions. Two key templates:
-- `index.html`: Main page with HTMX-enabled form and SSE connection
+- `index.html`: Main page with HTMX-enabled form, SSE connection, and connection status flash
 - `message.html`: Reusable partial for message bubbles (used in streaming and static rendering)
 
 **Port Strategy**: HTTP port + 1000 = OpenCode port (predictable, avoids conflicts)
@@ -82,6 +82,14 @@ This is a **web-based chat interface for OpenCode** built with Go, HTMX 2, and S
 
 **Error Handling**: Uses polling instead of fixed waits. The `waitForOpencodeReady()` function polls `/session` endpoint until OpenCode is responsive or timeout occurs.
 
+**Connection Status Flash**: Client-side user feedback system that provides real-time connection status updates:
+- **SSE Connection Events**: Listens to `htmx:sseError`, `htmx:sseOpen`, `htmx:sseClose` for real-time connection status
+- **Send Error Handling**: Responds to `htmx:sendError`, `htmx:responseError`, `htmx:timeout` for message send failures
+- **Smart Messaging**: Contextual error messages (rate limits, server errors, timeouts, connection issues)
+- **Auto-hide Logic**: Success messages auto-hide after 2s, warnings/errors persist until resolved
+- **Tailwind Integration**: Uses `bg-amber-500` (warnings), `bg-green-500` (success), `bg-red-500` (errors)
+- **Responsive Design**: Works seamlessly across mobile/desktop viewport transitions
+
 ## Security Considerations
 
 - OpenCode runs in isolated temporary directories with PID in name for uniqueness
@@ -97,6 +105,12 @@ This is a **web-based chat interface for OpenCode** built with Go, HTMX 2, and S
 All tests use dynamic port allocation (`GetTestPort()`) to avoid conflicts. Integration tests properly wait for OpenCode readiness using polling instead of fixed sleeps. The `StartTestServer()` helper handles the full OpenCode startup sequence for integration tests.
 
 Critical for testing: OpenCode subprocess must be properly cleaned up in test cleanup to prevent orphaned processes. Use `defer server.stopOpencodeServer()` in all integration tests.
+
+**Connection Flash Testing**: The test suite includes comprehensive coverage for the connection status flash:
+- `testConnectionFlashFunctionality()` - Tests basic flash show/hide with different status types
+- `testFlashDuringResize()` - Validates flash persistence during viewport transitions
+- `testSendFailureFlash()` - Tests HTMX send error event handling (network errors, timeouts, server errors)
+- `testSSEEventHandlers()` - Tests SSE connection event simulation
 
 ### Playwright UI Tests
 

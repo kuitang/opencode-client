@@ -48,6 +48,12 @@
                 {{.MessagesHTML}}
             </div>
             
+            <!-- Connection Status Flash -->
+            <div id="connection-flash" 
+                 class="hidden px-4 py-2 text-white text-sm text-center transform -translate-y-full transition-all duration-300 ease-in-out opacity-0 z-50">
+                <span id="flash-message"></span>
+            </div>
+            
             <!-- Chat Input -->
             <div class="bg-white border-t border-gray-200 p-4">
                 <form id="message-form" hx-post="/send" hx-target="#messages" hx-swap="beforeend scroll:bottom" hx-disabled-elt="find button[type='submit'], find textarea" hx-on::after-request="document.getElementById('message-input').value=''; document.getElementById('message-input').style.height='auto';">

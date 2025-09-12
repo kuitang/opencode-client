@@ -185,3 +185,107 @@ const toggleChat = debounce(function() {
         }
     }
 }, 100); // 100ms debounce for toggle
+
+// Connection status flash management
+function showFlash(message, type, autoHide) {
+    const flash = document.getElementById('connection-flash');
+    const messageEl = document.getElementById('flash-message');
+    
+    if (!flash || !messageEl) return;
+    
+    // Clear existing classes and state
+    flash.classList.remove('hidden', 'bg-amber-500', 'bg-green-500', 'bg-red-500', 'flash-hidden', 'flash-visible');
+    
+    // Set message and show
+    messageEl.textContent = message;
+    flash.classList.add('flash-visible');
+    
+    // Apply color based on type
+    switch(type) {
+        case 'warning':
+            flash.classList.add('bg-amber-500');
+            break;
+        case 'success':
+            flash.classList.add('bg-green-500');
+            break;
+        case 'error':
+            flash.classList.add('bg-red-500');
+            break;
+        default:
+            flash.classList.add('bg-gray-500');
+    }
+    
+    // Auto-hide if specified
+    if (autoHide) {
+        setTimeout(() => {
+            flash.classList.remove('flash-visible');
+            flash.classList.add('flash-hidden');
+            setTimeout(() => flash.classList.add('hidden'), 300);
+        }, autoHide);
+    }
+}
+
+function hideFlash() {
+    const flash = document.getElementById('connection-flash');
+    if (!flash) return;
+    
+    flash.classList.remove('flash-visible');
+    flash.classList.add('flash-hidden');
+    setTimeout(() => flash.classList.add('hidden'), 300);
+}
+
+// SSE Connection Status Event Handlers
+document.addEventListener('DOMContentLoaded', function() {
+    // Listen for SSE connection events
+    document.body.addEventListener('htmx:sseError', function(event) {
+        console.log('SSE Error detected:', event.detail);
+        showFlash('Connection lost - reconnecting...', 'warning');
+    });
+    
+    document.body.addEventListener('htmx:sseOpen', function(event) {
+        console.log('SSE Connection opened:', event.detail);
+        showFlash('Connected', 'success', 2000); // Auto-hide after 2 seconds
+    });
+    
+    document.body.addEventListener('htmx:sseClose', function(event) {
+        console.log('SSE Connection closed:', event.detail);
+        const reason = event.detail?.type || 'unknown';
+        
+        // Only show flash for unexpected closures, not intentional ones
+        if (reason === 'nodeMissing' || reason === 'nodeReplaced') {
+            // Don't show flash for these cases (likely page navigation)
+            return;
+        }
+        
+        showFlash('Connection closed', 'error');
+    });
+    
+    // HTMX Send Error Event Handlers
+    document.body.addEventListener('htmx:sendError', function(event) {
+        console.log('Send Error detected:', event.detail);
+        showFlash('Failed to send message - check your connection', 'error', 5000);
+    });
+    
+    document.body.addEventListener('htmx:responseError', function(event) {
+        console.log('Response Error detected:', event.detail);
+        const status = event.detail.xhr?.status || 0;
+        let message = 'Server error - please try again';
+        
+        if (status === 429) {
+            message = 'Rate limited - please wait a moment';
+        } else if (status >= 500) {
+            message = 'Server temporarily unavailable';
+        } else if (status === 401 || status === 403) {
+            message = 'Session expired - please refresh the page';
+        } else if (status >= 400) {
+            message = 'Request failed - please check your input';
+        }
+        
+        showFlash(message, 'error', 8000);
+    });
+    
+    document.body.addEventListener('htmx:timeout', function(event) {
+        console.log('Request timeout detected:', event.detail);
+        showFlash('Request timed out - please try again', 'warning', 5000);
+    });
+});

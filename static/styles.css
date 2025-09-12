@@ -174,3 +174,14 @@
     padding: 0 !important;
     color: inherit !important;
 }
+
+/* Connection flash animation states */
+.flash-visible {
+    transform: translateY(0) !important;
+    opacity: 1 !important;
+}
+
+.flash-hidden {
+    transform: translateY(-100%) !important;
+    opacity: 0 !important;
+}
