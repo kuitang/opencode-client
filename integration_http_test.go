@@ -12,6 +12,9 @@ import (
 	"time"
 )
 
+// NOTE: These HTTP/SSE rendering tests intentionally do NOT use a real sandbox.
+// They mock upstreams via httptest.Server and use StaticURLSandbox for fast, deterministic checks.
+
 // MockOpencodeServer simulates OpenCode's /session/{id}/message endpoint
 type MockOpencodeServer struct {
 	*httptest.Server
@@ -150,10 +153,10 @@ func TestHTTPEndpointWithRichContent(t *testing.T) {
 	}
 
 	server := &Server{
-		opencodePort: mockServer.Port(),
-		sessions:     make(map[string]string),
-		templates:    templates,
+		sessions:  make(map[string]string),
+		templates: templates,
 	}
+	server.sandbox = NewStaticURLSandbox(mockServer.Server.URL)
 	server.sessions["test-cookie"] = "test-session"
 
 	// Create enhanced handler that uses the new rendering
@@ -309,10 +312,10 @@ func TestHTTPEndpointWithTodoWrite(t *testing.T) {
 	}
 
 	server := &Server{
-		opencodePort: mockServer.Port(),
-		sessions:     make(map[string]string),
-		templates:    templates,
+		sessions:  make(map[string]string),
+		templates: templates,
 	}
+	server.sandbox = NewStaticURLSandbox(mockServer.Server.URL)
 	server.sessions["test-cookie"] = "test-session"
 
 	// Create enhanced handler

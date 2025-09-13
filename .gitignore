@@ -41,3 +41,6 @@ Thumbs.db
 .server_pid
 .server.pid
 coverage.out
+
+# Ignore local trace-auth tool
+cmd/trace-auth/

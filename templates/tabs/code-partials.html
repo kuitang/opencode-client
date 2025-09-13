@@ -1,0 +1,68 @@
+{{define "code-placeholder"}}
+<div class="text-center py-20">
+    <svg class="w-16 h-16 mx-auto text-gray-500 mb-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M10 20l4-16m4 4l4 4-4 4M6 16l-4-4 4-4"/>
+    </svg>
+    <h3 class="text-lg font-medium text-gray-300 mb-2">Select a File</h3>
+    <p class="text-gray-500 max-w-md mx-auto">Select a file from the dropdown above to view its contents.</p>
+</div>
+{{end}}
+
+{{define "code-error"}}
+<div class="text-center py-20">
+    <p class="text-red-400">File not found: {{.Filepath}}</p>
+</div>
+{{end}}
+
+{{define "code-content"}}
+<pre class="code-display overflow-x-auto" data-filepath="{{.Filepath}}">{{range .Lines}}<code>{{if eq . ""}} {{else}}{{.}}{{end}}</code>{{end}}</pre>
+{{end}}
+
+{{define "file-count-content"}}
+<p class="text-2xl font-semibold text-gray-900">{{.FileCount}}</p>
+<p class="text-sm text-gray-600">Files</p>
+{{end}}
+
+{{define "line-count-content"}}
+<p class="text-2xl font-semibold text-gray-900">{{.LineCount}}</p>
+<p class="text-sm text-gray-600">Lines of Code</p>
+{{end}}
+
+{{define "file-options-content"}}
+{{if .Files}}
+    <option value="">Select a file...</option>
+    {{range .Files}}
+    <option value="{{.Path}}" {{if eq .Path $.CurrentPath}}selected{{end}}>{{.Path}}</option>
+    {{end}}
+{{else}}
+    <option value="">No files generated</option>
+{{end}}
+{{end}}
+
+{{define "file-dropdown"}}
+<select id="file-selector"
+        class="px-3 py-2 text-sm border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500 min-h-[44px]"
+        name="path"
+        hx-get="/tab/code/file"
+        hx-trigger="change"
+        hx-target="#code-content"
+        hx-swap="innerHTML"
+        onfocus="htmx.ajax('GET', '/tab/code/filelist?options_only=true&current=' + encodeURIComponent(this.value), {target: this, swap: 'innerHTML'})">
+    {{template "file-options-content" .}}
+</select>
+{{end}}
+
+{{define "file-options"}}
+{{template "file-options-content" .}}
+{{end}}
+
+{{define "file-options-with-counts"}}
+{{template "file-options-content" .}}
+<!-- OOB updates for file and line counts -->
+<div id="file-count-container" hx-swap-oob="innerHTML">
+    {{template "file-count-content" .}}
+</div>
+<div id="line-count-container" hx-swap-oob="innerHTML">
+    {{template "line-count-content" .}}
+</div>
+{{end}}

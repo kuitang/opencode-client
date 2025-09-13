@@ -6,16 +6,18 @@ A web-based chat interface for OpenCode using Go and HTMX.
 
 ```
 .
-├── main.go                       # Main server application
-├── templates/                    # HTML templates
-│   ├── index.html               # Main page layout
-│   └── message.html             # Reusable message bubble partial
-├── static/                      # Static assets
-│   └── styles.css              # CSS styles
-├── main_unit_test.go           # Unit tests (server logic)
-├── main_integration_test.go    # Integration tests (HTML/DOM testing)
-├── test_common_test.go         # Shared test utilities
-└── go.mod                      # Go module dependencies
+├── main.go                          # Main server application
+├── templates/                       # HTML templates
+│   ├── index.html                  # Main page layout
+│   └── message.html                # Reusable message bubble partial
+├── static/                         # Static assets
+│   └── styles.css                 # CSS styles
+├── integration_http_test.go        # Mocked HTTP/SSE rendering tests (no Docker)
+├── integration_flow_test.go        # Regular flow tests (one sandbox/server per file)
+├── integration_race_signal_test.go # Race condition + signal tests (one sandbox/server per file)
+├── test_suite_helpers.go           # Per-file suite server helper (RealSuiteServer)
+├── suite_main_test.go              # Global cleanup for suite servers
+└── go.mod                          # Go module dependencies
 ```
 
 ## Features
@@ -75,27 +77,49 @@ go build -o opencode-chat
 
 ## Testing
 
-### Go Tests
+There are two categories of tests:
+
+- Unit tests (no Docker): consolidated into three files
+  - `unit_rendering_test.go` — templates, UI, and rendering pipeline
+  - `unit_server_test.go` — logging, message parts, readiness helpers
+  - `unit_race_test.go` — rate limiter and SSE duplication/concurrency
+- Integration tests:
+  - Mocked HTTP/SSE (fast; no Docker): `integration_http_test.go`
+  - Flow (real sandbox; Docker + auth.json): `integration_flow_test.go`
+  - Race/Signals (real sandbox; signals + full app): `integration_race_signal_test.go`
+
+Integration suites start exactly one real sandbox/server per file via `RealSuiteServer`, so tests within a file do not repeatedly start Docker.
+
+### Commands
 
 ```bash
-# Run all tests
-go test -v
+# All tests (about ~30s on a warm Docker)
+go test -v ./...
 
-# Run only unit tests
-go test -v -run "Test(ServerStartup|SessionManagement|ConcurrentSessions)"
+# Fast mocked tests only (no Docker)
+make test-fast
 
-# Run only integration tests (requires goquery)
-go test -v -run "Test(IndexPage|SendMessage|SSEStreaming|ClearSession|GetMessages|ProviderModelSelection|SSEEndpoint|HTMXHeaders)"
+# Unit tests only (no Docker; consolidated)
+make test-unit
 
-# Run with coverage
-go test -v -cover
+# Flow suite (real sandbox; requires Docker and ~/.local/share/opencode/auth.json)
+make test-flow
 
-# Manual testing with curl
-curl -c cookies.txt http://localhost:8080/
-curl -X POST http://localhost:8080/send \
-  -b cookies.txt \
-  -d "message=Hello&provider=anthropic&model=claude-3-5-sonnet"
+# Race + Signals (real sandbox; signals build and run the app)
+make test-race-signal
+
+# Race detector
+make test-race
+
+# Coverage
+make cover
 ```
+
+Notes:
+- Real-sandbox tests require Docker and a valid OpenCode auth.json at `~/.local/share/opencode/auth.json`.
+- Tests select a supported provider/model at runtime (no hard-coded model IDs).
+- SSE tests are bounded by context timeouts and do not hang.
+ - Unit tests cover rendering, server helpers, and concurrency primitives without requiring Docker.
 
 ### Playwright UI Tests
 
@@ -130,15 +154,16 @@ go build -o opencode-chat *.go && ./opencode-chat -port 8080
 2. **Reusable message partial**: Single message template used across all rendering paths
 3. **Embedded files**: Templates and static files are embedded in the binary for easy deployment
 4. **Constructor pattern**: `NewServer()` ensures proper initialization of templates
-5. **Test organization**: Unit tests separate from integration tests for clarity
+5. **Test organization**: Three suites (mocked HTTP, flow, race/signals) with one sandbox per file
 6. **HTMX-only approach**: All UI updates via HTML fragments, no JSON APIs
 7. **Port offset strategy**: OpenCode port = HTTP port + 1000 for predictability
 
 ## Dependencies
 
 - Go 1.19+
-- OpenCode CLI (`opencode` command must be in PATH)
-- github.com/PuerkitoBio/goquery (for testing only)
+- Docker (for real sandbox tests)
+- OpenCode sandbox image (built by the repo’s Dockerfile in `sandbox/`)
+- github.com/PuerkitoBio/goquery (for HTML parsing in tests)
 
 ## OpenCode API Documentation
 

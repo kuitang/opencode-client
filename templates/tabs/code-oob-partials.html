@@ -1,0 +1,54 @@
+{{define "code-updates-oob"}}
+<!-- File stats update -->
+<div id="file-count-container" hx-swap-oob="innerHTML">
+    {{template "file-count-content" .}}
+</div>
+<div id="line-count-container" hx-swap-oob="innerHTML">
+    {{template "line-count-content" .}}
+</div>
+<!-- File dropdown update with selection preservation -->
+<div id="file-selector-wrapper" hx-swap-oob="innerHTML">
+    <script>
+        // Preserve current selection before update
+        const currentSelect = document.querySelector('#file-selector');
+        const currentValue = currentSelect ? currentSelect.value : '';
+        const hadFocus = currentSelect === document.activeElement;
+    </script>
+    <select id="file-selector"
+            class="px-3 py-2 text-sm border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500 min-h-[44px]"
+            name="path"
+            hx-get="/tab/code/file"
+            hx-trigger="change"
+            hx-target="#code-content"
+            hx-swap="innerHTML"
+            onfocus="htmx.ajax('GET', '/tab/code/filelist?options_only=true&current=' + encodeURIComponent(this.value), {target: this, swap: 'innerHTML'})">
+        {{template "file-options-content" .}}
+    </select>
+    <script>
+        // Restore selection and focus after update
+        const newSelect = document.querySelector('#file-selector');
+        if (newSelect && currentValue) {
+            // Check if the option still exists
+            const optionExists = Array.from(newSelect.options).some(opt => opt.value === currentValue);
+            if (optionExists) {
+                newSelect.value = currentValue;
+            }
+        }
+        if (hadFocus && newSelect) {
+            newSelect.focus();
+        }
+    </script>
+</div>
+<!-- Code content placeholder update when files arrive but none selected -->
+{{if and .Files (eq .CurrentPath "")}}
+<div id="code-content" hx-swap-oob="innerHTML">
+    <div class="text-center py-20">
+        <svg class="w-16 h-16 mx-auto text-gray-500 mb-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M10 20l4-16m4 4l4 4-4 4M6 16l-4-4 4-4"/>
+        </svg>
+        <h3 class="text-lg font-medium text-gray-300 mb-2">Select a File</h3>
+        <p class="text-gray-500 max-w-md mx-auto">Select a file from the dropdown above to view its contents.</p>
+    </div>
+</div>
+{{end}}
+{{end}}

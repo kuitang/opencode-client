@@ -210,7 +210,7 @@ func loadTemplates() (*template.Template, error) {
 	funcMap := template.FuncMap{
 		"add": func(a, b int) int { return a + b },
 	}
-	return template.New("").Funcs(funcMap).ParseFS(templateFS, "templates/*.html")
+	return template.New("").Funcs(funcMap).ParseFS(templateFS, "templates/*.html", "templates/tabs/*.html")
 }
 
 // renderMessage renders a message using the provided templates
@@ -301,10 +301,12 @@ func transformMessagePart(templates *template.Template, part MessagePart) Messag
 
 	case "reasoning":
 		reasoningText := fmt.Sprintf("🤔 Reasoning:\n%s", part.Text)
+		renderedHTML := renderText(reasoningText)
 		return MessagePartData{
-			Type:    "reasoning",
-			Content: reasoningText,
-			PartID:  part.ID,
+			Type:         "reasoning",
+			Content:      reasoningText,
+			RenderedHTML: renderedHTML,
+			PartID:       part.ID,
 		}
 
 	case "step-start":

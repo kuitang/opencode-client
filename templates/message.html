@@ -3,13 +3,9 @@
     <div class="max-w-[70%] p-3 rounded-lg break-words {{if eq .Alignment "left"}}bg-gray-200 rounded-bl-none{{else}}bg-gray-300 rounded-br-none{{end}}">
         {{if .Parts}}
             {{range .Parts}}
-                {{if eq .Type "text"}}
+                {{if or (eq .Type "text") (eq .Type "reasoning")}}
                     <div class="my-2 first:mt-0 last:mb-0 prose prose-sm max-w-none prose-ul:list-disc prose-ul:pl-5 prose-ol:list-decimal prose-ol:pl-5 prose-li:my-0">
                         {{.RenderedHTML}}
-                    </div>
-                {{else if eq .Type "reasoning"}}
-                    <div class="my-2 first:mt-0 last:mb-0">
-                        <pre class="overflow-x-auto">{{.Content}}</pre>
                     </div>
                 {{else if eq .Type "tool"}}
                     {{if .RenderedHTML}}

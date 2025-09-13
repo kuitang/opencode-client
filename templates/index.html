@@ -39,13 +39,20 @@
             </header>
             
             <!-- Chat Messages -->
-            <div class="flex-1 overflow-y-auto p-4 lg:block max-lg:h-64" 
+            <div class="flex-1 overflow-y-auto p-4 lg:block max-lg:h-64"
                  id="messages"
                  hx-ext="sse"
                  sse-connect="/events"
                  sse-swap="message"
                  hx-swap="beforeend scroll:bottom">
                 {{.MessagesHTML}}
+            </div>
+
+            <!-- Hidden SSE listener for code tab updates -->
+            <div style="display:none"
+                 hx-ext="sse"
+                 sse-connect="/events"
+                 sse-swap="code-updates">
             </div>
             
             <!-- Connection Status Flash -->
