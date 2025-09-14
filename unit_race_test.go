@@ -1,6 +1,7 @@
 package main
 
 import (
+	"context"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -14,7 +15,7 @@ func TestUpdateRateLimiter_FirstUpdateImmediate(t *testing.T) {
 	var executed int32
 	limiter := NewUpdateRateLimiter(200 * time.Millisecond)
 	start := time.Now()
-	limiter.TryUpdate(func() { atomic.AddInt32(&executed, 1) })
+	limiter.TryUpdate(context.Background(), func() { atomic.AddInt32(&executed, 1) })
 	time.Sleep(50 * time.Millisecond)
 	if atomic.LoadInt32(&executed) != 1 {
 		t.Error("First update should be immediate")
@@ -27,13 +28,13 @@ func TestUpdateRateLimiter_FirstUpdateImmediate(t *testing.T) {
 func TestUpdateRateLimiter_SecondUpdateDelayed(t *testing.T) {
 	var executed int32
 	limiter := NewUpdateRateLimiter(200 * time.Millisecond)
-	limiter.TryUpdate(func() { atomic.AddInt32(&executed, 1) })
+	limiter.TryUpdate(context.Background(), func() { atomic.AddInt32(&executed, 1) })
 	time.Sleep(50 * time.Millisecond)
 	if atomic.LoadInt32(&executed) != 1 {
 		t.Fatal("First update should have executed")
 	}
 	time.Sleep(50 * time.Millisecond)
-	limiter.TryUpdate(func() { atomic.AddInt32(&executed, 1) })
+	limiter.TryUpdate(context.Background(), func() { atomic.AddInt32(&executed, 1) })
 	time.Sleep(50 * time.Millisecond)
 	if atomic.LoadInt32(&executed) != 1 {
 		t.Error("Second update should still be delayed at 150ms")
@@ -48,9 +49,9 @@ func TestUpdateRateLimiter_UpdateAfterInterval(t *testing.T) {
 	var executed []time.Time
 	var mu sync.Mutex
 	limiter := NewUpdateRateLimiter(200 * time.Millisecond)
-	limiter.TryUpdate(func() { mu.Lock(); executed = append(executed, time.Now()); mu.Unlock() })
+	limiter.TryUpdate(context.Background(), func() { mu.Lock(); executed = append(executed, time.Now()); mu.Unlock() })
 	time.Sleep(250 * time.Millisecond)
-	limiter.TryUpdate(func() { mu.Lock(); executed = append(executed, time.Now()); mu.Unlock() })
+	limiter.TryUpdate(context.Background(), func() { mu.Lock(); executed = append(executed, time.Now()); mu.Unlock() })
 	time.Sleep(50 * time.Millisecond)
 	mu.Lock()
 	defer mu.Unlock()
@@ -66,14 +67,14 @@ func TestUpdateRateLimiter_RapidUpdatesCoalesce(t *testing.T) {
 	var lastValue int32
 	var executionCount int32
 	limiter := NewUpdateRateLimiter(200 * time.Millisecond)
-	limiter.TryUpdate(func() { atomic.StoreInt32(&lastValue, 1); atomic.AddInt32(&executionCount, 1) })
+	limiter.TryUpdate(context.Background(), func() { atomic.StoreInt32(&lastValue, 1); atomic.AddInt32(&executionCount, 1) })
 	time.Sleep(50 * time.Millisecond)
 	if atomic.LoadInt32(&executionCount) != 1 {
 		t.Fatal("First update should have executed")
 	}
 	for i := 2; i <= 5; i++ {
 		value := int32(i)
-		limiter.TryUpdate(func() { atomic.StoreInt32(&lastValue, value); atomic.AddInt32(&executionCount, 1) })
+		limiter.TryUpdate(context.Background(), func() { atomic.StoreInt32(&lastValue, value); atomic.AddInt32(&executionCount, 1) })
 		time.Sleep(25 * time.Millisecond)
 	}
 	if atomic.LoadInt32(&executionCount) != 1 {
@@ -94,7 +95,7 @@ func TestUpdateRateLimiter_ConcurrentUpdates(t *testing.T) {
 	var wg sync.WaitGroup
 	for i := 0; i < 100; i++ {
 		wg.Add(1)
-		go func() { defer wg.Done(); limiter.TryUpdate(func() { atomic.AddInt32(&counter, 1) }) }()
+		go func() { defer wg.Done(); limiter.TryUpdate(context.Background(), func() { atomic.AddInt32(&counter, 1) }) }()
 	}
 	wg.Wait()
 	time.Sleep(50 * time.Millisecond)
@@ -111,11 +112,11 @@ func TestUpdateRateLimiter_TimerCancellation(t *testing.T) {
 	var executed []int
 	var mu sync.Mutex
 	limiter := NewUpdateRateLimiter(200 * time.Millisecond)
-	limiter.TryUpdate(func() { mu.Lock(); executed = append(executed, 1); mu.Unlock() })
+	limiter.TryUpdate(context.Background(), func() { mu.Lock(); executed = append(executed, 1); mu.Unlock() })
 	time.Sleep(50 * time.Millisecond)
-	limiter.TryUpdate(func() { mu.Lock(); executed = append(executed, 2); mu.Unlock() })
+	limiter.TryUpdate(context.Background(), func() { mu.Lock(); executed = append(executed, 2); mu.Unlock() })
 	time.Sleep(50 * time.Millisecond)
-	limiter.TryUpdate(func() { mu.Lock(); executed = append(executed, 3); mu.Unlock() })
+	limiter.TryUpdate(context.Background(), func() { mu.Lock(); executed = append(executed, 3); mu.Unlock() })
 	time.Sleep(150 * time.Millisecond)
 	mu.Lock()
 	defer mu.Unlock()
@@ -135,7 +136,7 @@ func TestUpdateRateLimiter_MultipleIntervals(t *testing.T) {
 	timings := []time.Duration{0, 50 * time.Millisecond, 250 * time.Millisecond, 300 * time.Millisecond, 600 * time.Millisecond}
 	for _, delay := range timings {
 		time.Sleep(delay - time.Since(startTime))
-		limiter.TryUpdate(func() { mu.Lock(); executionTimes = append(executionTimes, time.Now()); mu.Unlock() })
+		limiter.TryUpdate(context.Background(), func() { mu.Lock(); executionTimes = append(executionTimes, time.Now()); mu.Unlock() })
 	}
 	time.Sleep(700*time.Millisecond - time.Since(startTime))
 	mu.Lock()

@@ -288,4 +288,21 @@ document.addEventListener('DOMContentLoaded', function() {
         console.log('Request timeout detected:', event.detail);
         showFlash('Request timed out - please try again', 'warning', 5000);
     });
+
+    // Auto-scroll on SSE messages
+    document.body.addEventListener('htmx:sseMessage', function(event) {
+        const messagesDiv = document.getElementById('messages');
+        if (!messagesDiv) return;
+
+        // Check if user is near bottom (within 100px threshold)
+        const isNearBottom = messagesDiv.scrollHeight - messagesDiv.scrollTop - messagesDiv.clientHeight < 100;
+
+        // Only auto-scroll if user was already near bottom
+        if (isNearBottom) {
+            requestAnimationFrame(() => {
+                messagesDiv.scrollTop = messagesDiv.scrollHeight;
+            });
+        }
+    });
+
 });

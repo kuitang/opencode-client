@@ -207,10 +207,45 @@ func renderText(text string) template.HTML {
 
 // loadTemplates loads and parses all templates from the embedded filesystem
 func loadTemplates() (*template.Template, error) {
+	// Pre-declare renderComponent variable for closure
+	var renderComponent func(string, interface{}) template.HTML
+
 	funcMap := template.FuncMap{
 		"add": func(a, b int) int { return a + b },
+		"dict": func(values ...interface{}) map[string]interface{} {
+			if len(values)%2 != 0 {
+				panic("dict must have even number of arguments")
+			}
+			dict := make(map[string]interface{})
+			for i := 0; i < len(values); i += 2 {
+				key, ok := values[i].(string)
+				if !ok {
+					panic("dict keys must be strings")
+				}
+				dict[key] = values[i+1]
+			}
+			return dict
+		},
+		"renderComponent": func(templateName string, data interface{}) template.HTML {
+			return renderComponent(templateName, data)
+		},
 	}
-	return template.New("").Funcs(funcMap).ParseFS(templateFS, "templates/*.html", "templates/tabs/*.html")
+
+	tmpl, err := template.New("").Funcs(funcMap).ParseFS(templateFS, "templates/*.html", "templates/tabs/*.html")
+	if err != nil {
+		return nil, err
+	}
+
+	// Now set the actual renderComponent function that can access tmpl
+	renderComponent = func(templateName string, data interface{}) template.HTML {
+		var buf bytes.Buffer
+		if err := tmpl.ExecuteTemplate(&buf, templateName, data); err != nil {
+			return template.HTML(fmt.Sprintf("<!-- Error rendering %s: %v -->", templateName, err))
+		}
+		return template.HTML(buf.String())
+	}
+
+	return tmpl, nil
 }
 
 // renderMessage renders a message using the provided templates

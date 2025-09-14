@@ -29,6 +29,10 @@ type Sandbox interface {
 	// This handles port translation and networking for the sandbox environment
 	OpencodeURL() string
 
+	// GottyURL returns the HTTP URL for accessing the Gotty terminal interface
+	// Returns empty string if terminal is not available for this sandbox type
+	GottyURL() string
+
 	// DownloadZip creates a zip archive of the sandbox working directory
 	// Returns an io.ReadCloser that can be streamed directly to HTTP responses
 	// The caller is responsible for closing the returned ReadCloser
@@ -39,6 +43,10 @@ type Sandbox interface {
 
 	// IsRunning returns true if the sandbox is currently running
 	IsRunning() bool
+
+	// ContainerIP returns the IP address of the sandbox container (for Docker)
+	// Returns empty string for non-Docker sandboxes or if not available
+	ContainerIP() string
 }
 
 // loadAuthConfig loads the OpenCode authentication configuration from the standard location

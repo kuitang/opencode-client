@@ -12,9 +12,12 @@ import (
 	"io"
 	"log"
 	"net/http"
+	"net/http/httputil"
+	"net/url"
 	"os"
 	"os/signal"
 	"sort"
+	"strconv"
 	"strings"
 	"sync"
 	"syscall"
@@ -117,6 +120,14 @@ type CodeTabData struct {
 	LineCount int        `json:"lineCount"`
 }
 
+// MacChromeData holds data for the shared Mac OS chrome component
+type MacChromeData struct {
+	Title        string        `json:"title"`
+	LeftContent  template.HTML `json:"leftContent"`
+	RightContent template.HTML `json:"rightContent"`
+	MainContent  template.HTML `json:"mainContent"`
+}
+
 // LoggingResponseWriter wraps http.ResponseWriter to log all responses
 // UpdateRateLimiter implements a token bucket rate limiter for SSE updates
 // It ensures immediate first update, then enforces minimum interval between subsequent updates
@@ -136,7 +147,8 @@ func NewUpdateRateLimiter(interval time.Duration) *UpdateRateLimiter {
 
 // TryUpdate attempts to execute the update function, respecting rate limits
 // First update is immediate, subsequent updates are rate-limited to minInterval
-func (u *UpdateRateLimiter) TryUpdate(doUpdate func()) {
+// The context is used to cancel pending updates when the connection closes
+func (u *UpdateRateLimiter) TryUpdate(ctx context.Context, doUpdate func()) {
 	u.mu.Lock()
 	defer u.mu.Unlock()
 
@@ -146,8 +158,16 @@ func (u *UpdateRateLimiter) TryUpdate(doUpdate func()) {
 	// Send immediately if this is first update or enough time has passed
 	if u.lastSent.IsZero() || elapsed >= u.minInterval {
 		u.lastSent = now
-		// Execute in goroutine to avoid blocking
-		go doUpdate()
+		// Execute in goroutine to avoid blocking, but check context first
+		go func() {
+			select {
+			case <-ctx.Done():
+				// Context cancelled, don't execute update
+				return
+			default:
+				doUpdate()
+			}
+		}()
 		return
 	}
 
@@ -160,11 +180,21 @@ func (u *UpdateRateLimiter) TryUpdate(doUpdate func()) {
 	// Schedule update for when minInterval has elapsed since lastSent
 	remainingWait := u.minInterval - elapsed
 	u.pendingTimer = time.AfterFunc(remainingWait, func() {
-		u.mu.Lock()
-		u.lastSent = time.Now()
-		u.pendingTimer = nil
-		u.mu.Unlock()
-		doUpdate()
+		// Check if context is still valid before executing
+		select {
+		case <-ctx.Done():
+			// Context cancelled, don't execute update
+			u.mu.Lock()
+			u.pendingTimer = nil
+			u.mu.Unlock()
+			return
+		default:
+			u.mu.Lock()
+			u.lastSent = time.Now()
+			u.pendingTimer = nil
+			u.mu.Unlock()
+			doUpdate()
+		}
 	})
 }
 
@@ -292,7 +322,15 @@ func main() {
 	// Tab routes
 	http.HandleFunc("/tab/preview", loggingMiddleware(server.handleTabPreview))
 	http.HandleFunc("/tab/code", loggingMiddleware(server.handleTabCode))
+	http.HandleFunc("/tab/terminal", loggingMiddleware(server.handleTabTerminal))
 	http.HandleFunc("/tab/deployment", loggingMiddleware(server.handleTabDeployment))
+	// Terminal proxy - handle all paths starting with /terminal/
+	// Note: No logging middleware here as it interferes with WebSocket hijacking
+	http.HandleFunc("/terminal/", server.handleTerminalProxy)
+	// Preview proxy - handle all paths starting with /preview/
+	http.HandleFunc("/preview/", loggingMiddleware(server.handlePreviewProxy))
+	// Kill preview port handler
+	http.HandleFunc("/kill-preview-port", loggingMiddleware(server.handleKillPreviewPort))
 	// API routes
 	http.HandleFunc("/tab/code/file", loggingMiddleware(server.handleFileContent))
 	http.HandleFunc("/tab/code/filelist", loggingMiddleware(server.handleFileList))
@@ -328,7 +366,12 @@ func main() {
 		log.Printf("HTTP server shutdown error: %v", err)
 	}
 
-	// Note: opencode cleanup happens via defer
+	// Explicit sandbox cleanup (also happens via defer as backup)
+	log.Printf("Cleaning up sandbox...")
+	if err := server.sandbox.Stop(); err != nil {
+		log.Printf("Error during explicit sandbox cleanup: %v", err)
+	}
+
 	log.Printf("Shutdown complete")
 }
 
@@ -491,15 +534,25 @@ func (s *Server) handleIndex(w http.ResponseWriter, r *http.Request) {
 	// Get existing messages
 	messagesHTML := s.getMessagesHTML(sessionID)
 
+	// Detect preview port for initial load
+	ports := s.detectOpenPorts()
+	var previewPort int
+	if len(ports) > 0 {
+		previewPort = ports[0]
+		log.Printf("handleIndex: Detected preview port %d", previewPort)
+	}
+
 	// Prepare template data
 	data := struct {
 		Models       []ModelOption
 		DefaultModel string
 		MessagesHTML template.HTML
+		PreviewPort  int
 	}{
 		Models:       s.getAllModels(),
 		DefaultModel: "anthropic/claude-sonnet-4-20250514", // Default to Claude Sonnet 4
 		MessagesHTML: template.HTML(messagesHTML),
+		PreviewPort:  previewPort,
 	}
 
 	w.Header().Set("Content-Type", "text/html")
@@ -808,7 +861,7 @@ func (s *Server) handleSSE(w http.ResponseWriter, r *http.Request) {
 					}
 					s.mu.RUnlock()
 
-					s.codeUpdateLimiter.TryUpdate(func() {
+					s.codeUpdateLimiter.TryUpdate(ctx, func() {
 						s.sendCodeTabUpdates(w, flusher, currentFile)
 					})
 				}
@@ -937,7 +990,22 @@ func min(a, b int) int {
 // Tab handler functions for HTMX requests
 func (s *Server) handleTabPreview(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Content-Type", "text/html")
-	if err := s.templates.ExecuteTemplate(w, "tab-preview", nil); err != nil {
+
+	// Detect open ports in the sandbox
+	ports := s.detectOpenPorts()
+	var previewPort int
+	if len(ports) > 0 {
+		previewPort = ports[0]
+		log.Printf("Preview: Detected open port %d", previewPort)
+	}
+
+	data := struct {
+		PreviewPort int
+	}{
+		PreviewPort: previewPort,
+	}
+
+	if err := s.templates.ExecuteTemplate(w, "tab-preview", data); err != nil {
 		http.Error(w, "Template error", http.StatusInternalServerError)
 		log.Printf("Tab preview template error: %v", err)
 	}
@@ -970,12 +1038,246 @@ func (s *Server) handleTabCode(w http.ResponseWriter, r *http.Request) {
 	}
 }
 
+func (s *Server) handleTabTerminal(w http.ResponseWriter, r *http.Request) {
+	w.Header().Set("Content-Type", "text/html")
+	data := map[string]interface{}{
+		"GottyURL": "",
+	}
+	if s.sandbox != nil && s.sandbox.IsRunning() {
+		gottyURL := s.sandbox.GottyURL()
+		log.Printf("Terminal tab: sandbox is running, GottyURL=%q", gottyURL)
+		data["GottyURL"] = gottyURL
+	} else {
+		log.Printf("Terminal tab: sandbox=%v, IsRunning=%v", s.sandbox != nil, s.sandbox != nil && s.sandbox.IsRunning())
+	}
+	if err := s.templates.ExecuteTemplate(w, "tab-terminal", data); err != nil {
+		http.Error(w, "Template error", http.StatusInternalServerError)
+		log.Printf("Tab terminal template error: %v", err)
+	}
+}
+
 func (s *Server) handleTabDeployment(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Content-Type", "text/html")
 	if err := s.templates.ExecuteTemplate(w, "tab-deployment", nil); err != nil {
 		http.Error(w, "Template error", http.StatusInternalServerError)
 		log.Printf("Tab deployment template error: %v", err)
 	}
+}
+
+// handleTerminalProxy proxies requests to the gotty terminal
+func (s *Server) handleTerminalProxy(w http.ResponseWriter, r *http.Request) {
+	if s.sandbox == nil || !s.sandbox.IsRunning() {
+		http.Error(w, "Terminal not available", http.StatusServiceUnavailable)
+		return
+	}
+
+	gottyURL := s.sandbox.GottyURL()
+	if gottyURL == "" {
+		http.Error(w, "Terminal not supported for this sandbox type", http.StatusNotImplemented)
+		return
+	}
+
+	// Parse the gotty URL
+	target, err := url.Parse(gottyURL)
+	if err != nil {
+		log.Printf("Error parsing gotty URL: %v", err)
+		http.Error(w, "Internal server error", http.StatusInternalServerError)
+		return
+	}
+
+	// Create reverse proxy
+	proxy := httputil.NewSingleHostReverseProxy(target)
+
+	// Configure the proxy director with path rewriting
+	proxy.Director = func(req *http.Request) {
+		req.URL.Scheme = target.Scheme
+		req.URL.Host = target.Host
+		req.Host = target.Host
+
+		// Critical: Strip "/terminal" prefix for gotty
+		originalPath := r.URL.Path
+		if strings.HasPrefix(originalPath, "/terminal") {
+			newPath := strings.TrimPrefix(originalPath, "/terminal")
+			if newPath == "" {
+				newPath = "/"
+			}
+			req.URL.Path = newPath
+		} else {
+			req.URL.Path = originalPath
+		}
+
+		// Preserve query parameters
+		req.URL.RawQuery = r.URL.RawQuery
+
+		// IMPORTANT: Set Origin header to match gotty's expectation
+		// Gotty v1.0.1 checks that Origin matches the Host
+		req.Header.Set("Origin", fmt.Sprintf("http://%s", target.Host))
+
+		// Forward important headers for WebSocket upgrade
+		if upgrade := r.Header.Get("Upgrade"); upgrade != "" {
+			req.Header.Set("Upgrade", upgrade)
+		}
+		if connection := r.Header.Get("Connection"); connection != "" {
+			req.Header.Set("Connection", connection)
+		}
+		// Forward WebSocket headers
+		for key, values := range r.Header {
+			if strings.HasPrefix(key, "Sec-Websocket-") {
+				for _, value := range values {
+					req.Header.Add(key, value)
+				}
+			}
+		}
+
+		// Log for debugging
+		log.Printf("Terminal proxy: %s -> %s (Origin: %s)", originalPath, req.URL.Path, req.Header.Get("Origin"))
+	}
+
+	// Better error handling
+	proxy.ErrorHandler = func(w http.ResponseWriter, r *http.Request, err error) {
+		log.Printf("Terminal proxy error for %s: %v", r.URL.Path, err)
+		http.Error(w, fmt.Sprintf("Terminal proxy error: %v", err), http.StatusBadGateway)
+	}
+
+	// Serve the request
+	proxy.ServeHTTP(w, r)
+}
+
+// handlePreviewProxy proxies requests to user applications running in the sandbox
+func (s *Server) handlePreviewProxy(w http.ResponseWriter, r *http.Request) {
+	if s.sandbox == nil || !s.sandbox.IsRunning() {
+		http.Error(w, "Sandbox not available", http.StatusServiceUnavailable)
+		return
+	}
+
+	// Get the first available port
+	ports := s.detectOpenPorts()
+	if len(ports) == 0 {
+		// Return a helpful message when no application is running
+		w.Header().Set("Content-Type", "text/html")
+		fmt.Fprintf(w, `
+			<div style="display: flex; align-items: center; justify-content: center; height: 100vh; font-family: system-ui, -apple-system, sans-serif;">
+				<div style="text-align: center;">
+					<h2 style="color: #666;">No Application Running</h2>
+					<p style="color: #999;">Start a web server on any port to see it here.</p>
+					<p style="color: #999; font-size: 0.9em;">Example: python -m http.server 5000</p>
+				</div>
+			</div>
+		`)
+		return
+	}
+
+	// Use the first detected port
+	port := ports[0]
+
+	// Get container IP for Docker sandbox, fall back to localhost for others
+	containerIP := s.sandbox.ContainerIP()
+	if containerIP == "" {
+		containerIP = "localhost"
+	}
+
+	targetURL := fmt.Sprintf("http://%s:%d", containerIP, port)
+	log.Printf("Preview proxy: forwarding to %s", targetURL)
+
+	// Parse the target URL
+	target, err := url.Parse(targetURL)
+	if err != nil {
+		log.Printf("Error parsing preview URL: %v", err)
+		http.Error(w, "Internal server error", http.StatusInternalServerError)
+		return
+	}
+
+	// Create reverse proxy
+	proxy := httputil.NewSingleHostReverseProxy(target)
+
+	// Modify the request to point to the application server
+	originalDirector := proxy.Director
+	proxy.Director = func(req *http.Request) {
+		originalDirector(req)
+		req.Host = target.Host
+		req.URL.Host = target.Host
+		req.URL.Scheme = target.Scheme
+
+		// Strip /preview/ prefix so user's app gets clean paths
+		if strings.HasPrefix(req.URL.Path, "/preview/") {
+			req.URL.Path = strings.TrimPrefix(req.URL.Path, "/preview")
+			if req.URL.Path == "" {
+				req.URL.Path = "/"
+			}
+		}
+
+		// Handle WebSocket upgrade headers
+		if req.Header.Get("Upgrade") == "websocket" {
+			req.Header.Set("Origin", targetURL)
+		}
+	}
+
+	// Add error handling
+	proxy.ErrorHandler = func(w http.ResponseWriter, r *http.Request, err error) {
+		log.Printf("Preview proxy error: %v", err)
+		// Return a user-friendly error message
+		w.Header().Set("Content-Type", "text/html")
+		w.WriteHeader(http.StatusBadGateway)
+		fmt.Fprintf(w, `
+			<div style="display: flex; align-items: center; justify-content: center; height: 100vh; font-family: system-ui, -apple-system, sans-serif;">
+				<div style="text-align: center;">
+					<h2 style="color: #d00;">Connection Error</h2>
+					<p style="color: #666;">Unable to connect to application on port %d</p>
+					<p style="color: #999; font-size: 0.9em;">The application may still be starting up. Try refreshing in a moment.</p>
+				</div>
+			</div>
+		`, port)
+	}
+
+	// Serve the request
+	proxy.ServeHTTP(w, r)
+}
+
+// handleKillPreviewPort handles killing a process listening on a specific port
+func (s *Server) handleKillPreviewPort(w http.ResponseWriter, r *http.Request) {
+	port := r.FormValue("port")
+	if port == "" {
+		http.Error(w, "Port parameter required", http.StatusBadRequest)
+		return
+	}
+
+	log.Printf("handleKillPreviewPort: Killing process on port %s", port)
+
+	s.mu.RLock()
+	sessionID := s.workspaceSession
+	s.mu.RUnlock()
+
+	if sessionID == "" {
+		http.Error(w, "No workspace session available", http.StatusInternalServerError)
+		return
+	}
+
+	// Execute kill command via OpenCode shell API
+	opencodeURL := s.sandbox.OpencodeURL()
+	shellURL := fmt.Sprintf("%s/session/%s/shell", opencodeURL, sessionID)
+
+	// Use the exact command format we tested
+	command := fmt.Sprintf("kill $(lsof -t -i:%s) 2>/dev/null || true", port)
+
+	payload := map[string]string{
+		"agent":   "agent",
+		"command": command,
+	}
+
+	reqBody, _ := json.Marshal(payload)
+	resp, err := http.Post(shellURL, "application/json", bytes.NewReader(reqBody))
+	if err != nil {
+		log.Printf("handleKillPreviewPort: Failed to execute kill command: %v", err)
+		// Continue anyway to refresh the preview
+	} else {
+		resp.Body.Close()
+	}
+
+	// Small delay to ensure process is killed
+	time.Sleep(500 * time.Millisecond)
+
+	// Return the refreshed preview tab content
+	s.handleTabPreview(w, r)
 }
 
 // fetchAllFiles recursively fetches all files from OpenCode sandbox
@@ -1028,6 +1330,118 @@ func (s *Server) fetchAllFiles() ([]FileNode, error) {
 
 	return allFiles, nil
 }
+
+// detectOpenPorts uses lsof to find open listening ports in the sandbox
+func (s *Server) detectOpenPorts() []int {
+	if s.sandbox == nil || !s.sandbox.IsRunning() {
+		return []int{}
+	}
+
+	s.mu.RLock()
+	sessionID := s.workspaceSession
+	s.mu.RUnlock()
+
+	if sessionID == "" {
+		log.Printf("detectOpenPorts: no workspace session available")
+		return []int{}
+	}
+
+	// Find all user ports (excluding system ports)
+	userPorts := s.findUserPorts(sessionID)
+
+	// TODO: Add socat tunneling for localhost-only ports in future
+	// For now, only return ports that are accessible from container IP
+
+	return userPorts
+}
+
+// findUserPorts finds all listening ports excluding system services
+func (s *Server) findUserPorts(sessionID string) []int {
+	opencodeURL := s.sandbox.OpencodeURL()
+	shellURL := fmt.Sprintf("%s/session/%s/shell", opencodeURL, sessionID)
+
+	// Find all listening TCP ports
+	command := `lsof -i -sTCP:LISTEN -P -n | grep -o ':[0-9]*' | sed 's/://' | sort -u`
+
+	payload := map[string]string{
+		"agent":   "agent",
+		"command": command,
+	}
+
+	reqBody, _ := json.Marshal(payload)
+	resp, err := http.Post(shellURL, "application/json", bytes.NewReader(reqBody))
+	if err != nil {
+		log.Printf("findUserPorts: failed to execute command: %v", err)
+		return []int{}
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
+		log.Printf("findUserPorts: command failed with status %d", resp.StatusCode)
+		return []int{}
+	}
+
+	var shellResult MessageResponse
+	if err := json.NewDecoder(resp.Body).Decode(&shellResult); err != nil {
+		log.Printf("findUserPorts: failed to decode shell response: %v", err)
+		return []int{}
+	}
+
+	outputText := ""
+	for _, part := range shellResult.Parts {
+		if part.Type == "tool" && part.Tool == "bash" {
+			if out, ok := part.State["output"].(string); ok {
+				outputText = out
+				log.Printf("findUserPorts: raw lsof output: %q", outputText)
+				break
+			}
+		}
+	}
+
+	// Parse port numbers and filter out system ports
+	ports := []int{}
+	lines := strings.Split(strings.TrimSpace(outputText), "\n")
+	for _, line := range lines {
+		line = strings.TrimSpace(line)
+		if line == "" {
+			continue
+		}
+
+		port, err := strconv.Atoi(line)
+		if err != nil {
+			continue
+		}
+
+		// Filter out system services and our own services
+		if port == 8080 || port == 8081 || port == 7681 || port < 1024 {
+			continue
+		}
+
+		ports = append(ports, port)
+	}
+
+	log.Printf("findUserPorts: found user ports %v", ports)
+	return ports
+}
+
+// TODO: Future socat tunneling functionality for localhost-only ports
+/*
+// isLocalhostOnly checks if a port is bound to localhost only (127.0.0.1)
+func (s *Server) isLocalhostOnly(sessionID string, port int) bool {
+	// Implementation commented out for now
+	return false
+}
+
+// createSocatTunnel creates a socat tunnel for localhost-only ports
+func (s *Server) createSocatTunnel(sessionID string, port int) {
+	// Implementation commented out for now
+}
+
+// executeShellCommand helper function to execute shell commands via OpenCode API
+func (s *Server) executeShellCommand(sessionID, command string) {
+	// Implementation commented out for now
+}
+*/
 
 // calculateLineCount runs wc -l command via OpenCode shell to get total line count
 func (s *Server) calculateLineCount() int {

@@ -64,6 +64,31 @@ func countOpencodeProcesses() int {
 	return count
 }
 
+func countDockerContainers(namePrefix string) int {
+	cmd := exec.Command("docker", "ps", "-a", "-q", "--filter", fmt.Sprintf("name=%s", namePrefix))
+	output, err := cmd.Output()
+	if err != nil {
+		return 0
+	}
+	containerIDs := strings.Fields(strings.TrimSpace(string(output)))
+	return len(containerIDs)
+}
+
+func createOrphanedContainer(t *testing.T) string {
+	// Create a test orphaned container
+	containerName := fmt.Sprintf("opencode-sandbox-test-%d", time.Now().UnixNano())
+
+	// Run a simple container that will be orphaned
+	cmd := exec.Command("docker", "run", "-d", "--name", containerName, "alpine:latest", "sleep", "3600")
+	if err := cmd.Run(); err != nil {
+		t.Logf("Failed to create orphaned container (may not have alpine image): %v", err)
+		return ""
+	}
+
+	t.Logf("Created orphaned test container: %s", containerName)
+	return containerName
+}
+
 func WaitForProcessCount(expectedCount int, timeout time.Duration) error {
 	start := time.Now()
 	for time.Since(start) < timeout {
@@ -318,7 +343,9 @@ func TestOpencodeCleanupOnSignal(t *testing.T) {
 		}
 	}
 	before := countOpencodeProcesses()
+	containersBefore := countDockerContainers("opencode-sandbox")
 	t.Logf("Opencode processes before signal: %d", before)
+	t.Logf("Docker containers before signal: %d", containersBefore)
 	if err := cmd.Process.Signal(syscall.SIGTERM); err != nil {
 		t.Fatalf("signal: %v", err)
 	}
@@ -339,9 +366,14 @@ func TestOpencodeCleanupOnSignal(t *testing.T) {
 		t.Logf("Warning: %v", err)
 	}
 	after := countOpencodeProcesses()
+	containersAfter := countDockerContainers("opencode-sandbox")
 	t.Logf("Opencode processes after signal: %d (was %d)", after, before)
+	t.Logf("Docker containers after signal: %d (was %d)", containersAfter, containersBefore)
 	if after >= before && before > 0 {
 		t.Error("Opencode process was not terminated")
+	}
+	if containersAfter >= containersBefore && containersBefore > 0 {
+		t.Error("Docker containers were not cleaned up")
 	}
 	if tempDir != "" {
 		if _, err := os.Stat(tempDir); !os.IsNotExist(err) {
@@ -349,5 +381,93 @@ func TestOpencodeCleanupOnSignal(t *testing.T) {
 		} else {
 			t.Logf("✓ Temp directory was properly cleaned up")
 		}
+	}
+}
+
+func TestDockerContainerCleanupOnStartup(t *testing.T) {
+	// Create some orphaned containers first
+	orphan1 := createOrphanedContainer(t)
+	orphan2 := createOrphanedContainer(t)
+
+	// Clean up orphans at end of test
+	defer func() {
+		if orphan1 != "" {
+			exec.Command("docker", "rm", "-f", orphan1).Run()
+		}
+		if orphan2 != "" {
+			exec.Command("docker", "rm", "-f", orphan2).Run()
+		}
+	}()
+
+	if orphan1 == "" || orphan2 == "" {
+		t.Skip("Could not create orphaned containers for test")
+	}
+
+	// Count containers before starting app
+	containersBefore := countDockerContainers("opencode-sandbox")
+	t.Logf("Docker containers before startup: %d", containersBefore)
+
+	if containersBefore < 2 {
+		t.Fatalf("Expected at least 2 orphaned containers, got %d", containersBefore)
+	}
+
+	// Build and start the application
+	buildCmd := exec.Command("go", "build", "-o", "test-opencode-chat", ".")
+	if err := buildCmd.Run(); err != nil {
+		t.Fatalf("build: %v", err)
+	}
+	defer os.Remove("test-opencode-chat")
+
+	port := GetTestPort()
+	cmd := exec.Command("./test-opencode-chat", "-port", fmt.Sprintf("%d", port))
+	cmd.Stdout = os.Stdout
+	cmd.Stderr = os.Stderr
+
+	if err := cmd.Start(); err != nil {
+		t.Fatalf("start: %v", err)
+	}
+	defer func() {
+		if cmd.Process != nil {
+			cmd.Process.Kill()
+			cmd.Wait()
+		}
+	}()
+
+	// Wait for the server to be ready (longer timeout due to Docker cleanup)
+	if err := WaitForHTTPServerReady(port, 30*time.Second); err != nil {
+		t.Fatalf("server ready: %v", err)
+	}
+
+	// Check that orphaned containers were cleaned up
+	containersAfter := countDockerContainers("opencode-sandbox")
+	t.Logf("Docker containers after startup: %d", containersAfter)
+
+	// Should have cleaned up orphans and created one new container
+	expectedContainers := 1 // The new container created by the app
+	if containersAfter != expectedContainers {
+		t.Errorf("Expected %d containers after startup (cleaned orphans + new container), got %d", expectedContainers, containersAfter)
+	}
+
+	// Gracefully shutdown
+	if err := cmd.Process.Signal(syscall.SIGTERM); err != nil {
+		t.Errorf("signal: %v", err)
+	}
+
+	done := make(chan error, 1)
+	go func() { done <- cmd.Wait() }()
+	select {
+	case <-done:
+		t.Log("Process terminated")
+	case <-time.After(10 * time.Second):
+		cmd.Process.Kill()
+		t.Fatal("timeout during shutdown")
+	}
+
+	// Verify final cleanup
+	finalContainers := countDockerContainers("opencode-sandbox")
+	t.Logf("Docker containers after shutdown: %d", finalContainers)
+
+	if finalContainers > 0 {
+		t.Errorf("Expected 0 containers after shutdown, got %d", finalContainers)
 	}
 }

@@ -44,7 +44,7 @@
                  hx-ext="sse"
                  sse-connect="/events"
                  sse-swap="message"
-                 hx-swap="beforeend scroll:bottom">
+                 hx-swap="beforeend">
                 {{.MessagesHTML}}
             </div>
 
@@ -63,7 +63,7 @@
             
             <!-- Chat Input -->
             <div class="bg-white border-t border-gray-200 p-4">
-                <form id="message-form" hx-post="/send" hx-target="#messages" hx-swap="beforeend scroll:bottom" hx-disabled-elt="find button[type='submit'], find textarea" hx-on::after-request="document.getElementById('message-input').value=''; document.getElementById('message-input').style.height='auto';">
+                <form id="message-form" hx-post="/send" hx-target="#messages" hx-swap="beforeend" hx-disabled-elt="find button[type='submit'], find textarea" hx-on::after-request="document.getElementById('message-input').value=''; document.getElementById('message-input').style.height='auto';">
                     <div class="flex gap-2 items-end">
                         <textarea id="message-input" 
                                   name="message" 
@@ -113,6 +113,13 @@
                         Code
                     </button>
                     <button class="px-6 h-full text-gray-500 hover:text-gray-700 font-medium focus:outline-none tab-button lg:flex-none max-lg:whitespace-nowrap flex items-center"
+                            hx-get="/tab/terminal"
+                            hx-target="#main-content"
+                            hx-swap="innerHTML"
+                            onclick="htmx.takeClass(this, 'active')">
+                        Terminal
+                    </button>
+                    <button class="px-6 h-full text-gray-500 hover:text-gray-700 font-medium focus:outline-none tab-button lg:flex-none max-lg:whitespace-nowrap flex items-center"
                             hx-get="/tab/deployment"
                             hx-target="#main-content"
                             hx-swap="innerHTML"
@@ -124,12 +131,7 @@
 
             <!-- Single Tab Content Area -->
             <section id="main-content" class="flex-1 lg:p-6 max-lg:p-4 overflow-y-auto bg-gray-50" role="tabpanel">
-                <div class="lg:max-w-4xl max-lg:max-w-full mx-auto">
-                    <h2 class="lg:text-2xl max-lg:text-xl font-bold text-gray-900 mb-4">Preview</h2>
-                    <div class="bg-white rounded-lg shadow lg:p-6 max-lg:p-4">
-                        <p class="text-gray-600">Welcome to VibeCoding! Your code preview will appear here.</p>
-                    </div>
-                </div>
+                {{template "tab-preview" .}}
             </section>
         </main>
     </div>

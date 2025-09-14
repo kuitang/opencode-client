@@ -705,6 +705,169 @@ async function testSSEEventHandlers() {
     }`);
 }
 
+// =======================
+// MAC CHROME CONSISTENCY TESTS
+// =======================
+
+// Test: Chrome Consistency Across All Tabs
+// Verifies that all tabs have identical Mac OS chrome styling
+async function testChromeConsistency() {
+    return await page.evaluate(`async () => {
+        const results = [];
+        const tabs = ['Preview', 'Code', 'Terminal', 'Deployment'];
+
+        for (const tabName of tabs) {
+            // Click on the tab
+            const tabButton = document.querySelector(\`button[hx-get*="/tab/\${tabName.toLowerCase()}"]\`) ||
+                            document.querySelector(\`button:contains("\${tabName}")\`) ||
+                            Array.from(document.querySelectorAll('button')).find(b => b.textContent.trim() === tabName);
+
+            if (!tabButton) {
+                results.push({
+                    tab: tabName,
+                    error: 'Tab button not found',
+                    passed: false
+                });
+                continue;
+            }
+
+            tabButton.click();
+
+            // Wait for content to load
+            await new Promise(resolve => setTimeout(resolve, 500));
+
+            // Find the chrome container
+            const chromeContainer = document.querySelector('.bg-white.rounded-lg.shadow-lg.border.border-gray-200');
+            if (!chromeContainer) {
+                results.push({
+                    tab: tabName,
+                    error: 'Chrome container not found',
+                    passed: false
+                });
+                continue;
+            }
+
+            // Find the toolbar
+            const toolbar = chromeContainer.querySelector('.flex.items-center.justify-between.px-6.py-4.border-b.border-gray-200.bg-gray-50.rounded-t-lg');
+            if (!toolbar) {
+                results.push({
+                    tab: tabName,
+                    error: 'Chrome toolbar not found',
+                    passed: false
+                });
+                continue;
+            }
+
+            // Check traffic lights
+            const trafficLights = toolbar.querySelectorAll('.w-3.h-3.rounded-full');
+            const trafficLightColors = Array.from(trafficLights).map(light => {
+                const classes = light.className;
+                if (classes.includes('bg-red-500')) return 'red';
+                if (classes.includes('bg-yellow-500')) return 'yellow';
+                if (classes.includes('bg-green-500')) return 'green';
+                return 'unknown';
+            });
+
+            // Check title
+            const title = toolbar.querySelector('h3.text-lg.font-semibold.text-gray-700');
+            const titleText = title ? title.textContent.trim() : '';
+
+            // Measure toolbar height
+            const toolbarHeight = toolbar.getBoundingClientRect().height;
+
+            // Check for consistent styling classes
+            const hasCorrectContainer = chromeContainer.classList.contains('bg-white') &&
+                                      chromeContainer.classList.contains('rounded-lg') &&
+                                      chromeContainer.classList.contains('shadow-lg') &&
+                                      chromeContainer.classList.contains('border') &&
+                                      chromeContainer.classList.contains('border-gray-200');
+
+            const hasCorrectToolbar = toolbar.classList.contains('flex') &&
+                                     toolbar.classList.contains('items-center') &&
+                                     toolbar.classList.contains('justify-between') &&
+                                     toolbar.classList.contains('bg-gray-50') &&
+                                     toolbar.classList.contains('rounded-t-lg');
+
+            results.push({
+                tab: tabName,
+                trafficLights: trafficLightColors,
+                title: titleText,
+                toolbarHeight: Math.round(toolbarHeight),
+                hasCorrectContainer: hasCorrectContainer,
+                hasCorrectToolbar: hasCorrectToolbar,
+                passed: trafficLightColors.length === 3 &&
+                       trafficLightColors[0] === 'red' &&
+                       trafficLightColors[1] === 'yellow' &&
+                       trafficLightColors[2] === 'green' &&
+                       hasCorrectContainer &&
+                       hasCorrectToolbar &&
+                       titleText !== ''
+            });
+        }
+
+        // Check if all toolbar heights are identical
+        const heights = results.map(r => r.toolbarHeight).filter(h => h > 0);
+        const heightsConsistent = heights.length > 0 && heights.every(h => h === heights[0]);
+
+        return {
+            tabResults: results,
+            heightsConsistent: heightsConsistent,
+            commonHeight: heights.length > 0 ? heights[0] : 0,
+            allTabsPassed: results.every(r => r.passed),
+            overallPassed: results.every(r => r.passed) && heightsConsistent
+        };
+    }`);
+}
+
+// Test: Tab Navigation Consistency
+// Verifies that all tabs load properly and have expected content
+async function testTabNavigation() {
+    return await page.evaluate(`async () => {
+        const results = [];
+        const tabs = [
+            { name: 'Preview', expectedContent: ['Live Preview', 'No Application Running'] },
+            { name: 'Code', expectedContent: ['Code Editor', 'No Code Generated'] },
+            { name: 'Terminal', expectedContent: ['Terminal', 'Connected'] },
+            { name: 'Deployment', expectedContent: ['Deployment', 'Ready to Deploy'] }
+        ];
+
+        for (const tab of tabs) {
+            const tabButton = Array.from(document.querySelectorAll('button')).find(b =>
+                b.textContent.trim() === tab.name);
+
+            if (!tabButton) {
+                results.push({
+                    tab: tab.name,
+                    error: 'Tab button not found',
+                    passed: false
+                });
+                continue;
+            }
+
+            tabButton.click();
+            await new Promise(resolve => setTimeout(resolve, 300));
+
+            const mainContent = document.getElementById('main-content');
+            const contentText = mainContent ? mainContent.textContent : '';
+
+            const hasExpectedContent = tab.expectedContent.some(expected =>
+                contentText.includes(expected));
+
+            results.push({
+                tab: tab.name,
+                hasExpectedContent: hasExpectedContent,
+                contentLength: contentText.length,
+                passed: hasExpectedContent && contentText.length > 0
+            });
+        }
+
+        return {
+            navigationResults: results,
+            allTabsWorking: results.every(r => r.passed)
+        };
+    }`);
+}
+
 // Usage instructions
 console.log(`
 ==============================================
@@ -717,9 +880,13 @@ To run these tests:
 3. Execute the test functions via page.evaluate()
 
 Critical tests for scroll preservation:
-- testScrollPositionPreservation() 
+- testScrollPositionPreservation()
 - testScrollPreservationWithToggle()
 - testResizeDuringActiveScrolling()
+
+New tests for Mac Chrome consistency:
+- testChromeConsistency() - Verify all tabs have identical Mac OS chrome
+- testTabNavigation() - Test tab switching and content loading
 
 These tests ensure UI stability during viewport
 transitions and preserve user scroll context.

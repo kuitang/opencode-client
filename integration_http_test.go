@@ -507,3 +507,217 @@ func TestHTTPEndpointErrorHandling(t *testing.T) {
 		t.Errorf("Expected 400 for invalid session, got %d", recorder2.Code)
 	}
 }
+
+func TestSSEScrollBehavior(t *testing.T) {
+	// Create mock OpenCode server with SSE endpoint
+	mockServer := NewMockOpencodeServer()
+	defer mockServer.Close()
+
+	// Add initial messages
+	userMessage := EnhancedMessageResponse{}
+	userMessage.Info.ID = "msg_001"
+	userMessage.Info.Role = "user"
+	userMessage.Info.SessionID = "test-session"
+	userMessage.Parts = []EnhancedMessagePart{
+		{
+			ID:        "prt_001",
+			MessageID: "msg_001",
+			SessionID: "test-session",
+			Type:      "text",
+			Text:      "What is the weather today?",
+		},
+	}
+	mockServer.AddMessage(userMessage)
+
+	// Assistant message that will stream
+	assistantMessage := EnhancedMessageResponse{}
+	assistantMessage.Info.ID = "msg_002"
+	assistantMessage.Info.Role = "assistant"
+	assistantMessage.Info.SessionID = "test-session"
+	assistantMessage.Info.ProviderID = "openai"
+	assistantMessage.Info.ModelID = "gpt-4"
+	assistantMessage.Parts = []EnhancedMessagePart{
+		{
+			ID:        "prt_002_001",
+			MessageID: "msg_002",
+			SessionID: "test-session",
+			Type:      "text",
+			Text:      "I'll check the weather for you...",
+		},
+		{
+			ID:        "prt_002_002",
+			MessageID: "msg_002",
+			SessionID: "test-session",
+			Type:      "tool",
+			Tool:      "weather",
+			State: map[string]interface{}{
+				"status": "completed",
+				"input": map[string]interface{}{
+					"location": "New York",
+				},
+				"output": "Temperature: 72°F, Sunny",
+			},
+		},
+		{
+			ID:        "prt_002_003",
+			MessageID: "msg_002",
+			SessionID: "test-session",
+			Type:      "text",
+			Text:      "Today in New York it's 72°F and sunny!",
+		},
+	}
+	mockServer.AddMessage(assistantMessage)
+
+	// Create test server
+	templates, err := loadTemplates()
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	server := &Server{
+		sessions:  make(map[string]string),
+		templates: templates,
+	}
+	server.sandbox = NewStaticURLSandbox(mockServer.Server.URL)
+	server.sessions["test-cookie"] = "test-session"
+
+	// Test 1: Verify index page has proper SSE setup
+	indexHandler := http.HandlerFunc(server.handleIndex)
+	req := httptest.NewRequest("GET", "/", nil)
+	req.AddCookie(&http.Cookie{Name: "session", Value: "test-cookie"})
+	recorder := httptest.NewRecorder()
+	indexHandler.ServeHTTP(recorder, req)
+
+	if recorder.Code != http.StatusOK {
+		t.Fatalf("Expected status 200, got %d", recorder.Code)
+	}
+
+	body := recorder.Body.String()
+
+	// Check for messages div
+	if !strings.Contains(body, `id="messages"`) {
+		t.Error("Expected messages div with id='messages'")
+	}
+
+	// Check for SSE attributes
+	if !strings.Contains(body, `sse-connect="/events"`) {
+		t.Error("Expected SSE connection to /events endpoint")
+	}
+	if !strings.Contains(body, `sse-swap="message"`) {
+		t.Error("Expected sse-swap='message' attribute")
+	}
+
+	// Check that scroll:bottom is removed (our fix)
+	if strings.Contains(body, `scroll:bottom`) {
+		t.Error("Found scroll:bottom in HTML - should be handled by JavaScript")
+	}
+
+	// Check for script.js inclusion
+	if !strings.Contains(body, `/static/script.js`) {
+		t.Error("Expected script.js to be included")
+	}
+
+	// Test 2: Mock SSE endpoint to simulate streaming
+	sseTestMux := http.NewServeMux()
+
+	// Mock the /event SSE endpoint
+	sseTestMux.HandleFunc("/event", func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "text/event-stream")
+		w.Header().Set("Cache-Control", "no-cache")
+		w.Header().Set("Connection", "keep-alive")
+
+		flusher, ok := w.(http.Flusher)
+		if !ok {
+			t.Error("Expected http.Flusher")
+			return
+		}
+
+		// Simulate initial message part
+		initialEvent := map[string]interface{}{
+			"type": "message.part.updated",
+			"properties": map[string]interface{}{
+				"info": map[string]interface{}{
+					"sessionID": "test-session",
+					"id":        "msg_002",
+				},
+				"partID": "prt_002_001",
+				"part": map[string]interface{}{
+					"type": "text",
+					"text": "I'll check the weather",
+				},
+			},
+		}
+		data, _ := json.Marshal(initialEvent)
+		fmt.Fprintf(w, "data: %s\n\n", string(data))
+		flusher.Flush()
+
+		// Simulate updated message part (OOB update)
+		time.Sleep(10 * time.Millisecond)
+		updateEvent := map[string]interface{}{
+			"type": "message.part.updated",
+			"properties": map[string]interface{}{
+				"info": map[string]interface{}{
+					"sessionID": "test-session",
+					"id":        "msg_002",
+				},
+				"partID": "prt_002_001",
+				"part": map[string]interface{}{
+					"type": "text",
+					"text": "I'll check the weather for you... (updating)",
+				},
+			},
+		}
+		data, _ = json.Marshal(updateEvent)
+		fmt.Fprintf(w, "data: %s\n\n", string(data))
+		flusher.Flush()
+	})
+
+	sseTestServer := httptest.NewServer(sseTestMux)
+	defer sseTestServer.Close()
+
+	// Test 3: Verify message rendering for SSE
+	// Transform and render messages to check proper ID attributes
+	for _, msg := range mockServer.Messages {
+		msgData := transformEnhancedMessage(templates, msg)
+
+		// Check for streaming state
+		msgData.IsStreaming = true // Simulate streaming
+
+		var buf bytes.Buffer
+		err := templates.ExecuteTemplate(&buf, "message", msgData)
+		if err != nil {
+			t.Errorf("Failed to render message: %v", err)
+			continue
+		}
+
+		html := buf.String()
+
+		// Verify message has ID for OOB updates
+		if strings.Contains(html, "id=") && msg.Info.Role == "assistant" {
+			// Assistant messages need IDs for SSE updates
+			if !strings.Contains(html, msg.Info.ID) {
+				t.Errorf("Expected message to have ID containing %s for OOB updates", msg.Info.ID)
+			}
+		}
+
+		// Check streaming class
+		if msgData.IsStreaming && !strings.Contains(html, "streaming") {
+			t.Error("Expected streaming class on message div")
+		}
+	}
+
+	// Test 4: Verify OOB updates
+	msgData := transformEnhancedMessage(templates, assistantMessage)
+	msgData.HXSwapOOB = true // This should be set for updates
+
+	var buf bytes.Buffer
+	err = templates.ExecuteTemplate(&buf, "message", msgData)
+	if err != nil {
+		t.Fatalf("Failed to render OOB message: %v", err)
+	}
+
+	html := buf.String()
+	if !strings.Contains(html, `hx-swap-oob="true"`) {
+		t.Error("Expected hx-swap-oob='true' for message updates")
+	}
+}

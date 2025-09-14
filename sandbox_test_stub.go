@@ -18,8 +18,10 @@ func NewStaticURLSandbox(url string) *StaticURLSandbox {
 
 func (s *StaticURLSandbox) Start(_ map[string]AuthConfig) error { s.running = true; return nil }
 func (s *StaticURLSandbox) OpencodeURL() string                 { return s.baseURL }
+func (s *StaticURLSandbox) GottyURL() string                    { return "" }
 func (s *StaticURLSandbox) Stop() error                         { s.running = false; return nil }
 func (s *StaticURLSandbox) IsRunning() bool                     { return s.running }
+func (s *StaticURLSandbox) ContainerIP() string                 { return "" }
 
 // DownloadZip returns an empty zip archive for compatibility.
 func (s *StaticURLSandbox) DownloadZip() (io.ReadCloser, error) {

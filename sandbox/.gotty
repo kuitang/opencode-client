@@ -1,0 +1,3 @@
+preferences {
+    scrollbar_visible = false
+}

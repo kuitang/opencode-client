@@ -777,3 +777,91 @@ func TestSSEStreamsToolOutput(t *testing.T) {
 		t.Fatalf("second frame should include tool output body\n%s", second)
 	}
 }
+
+func TestPreviewBasicFunctionality(t *testing.T) {
+	server := flowServer(t)
+
+	// Test port detection returns an array (possibly empty)
+	ports := server.detectOpenPorts()
+	if ports == nil {
+		t.Error("detectOpenPorts should return empty slice, not nil")
+	}
+	t.Logf("Detected ports: %v", ports)
+
+	// Test preview tab loads without error
+	req := httptest.NewRequest("GET", "/tab/preview", nil)
+	w := httptest.NewRecorder()
+	server.handleTabPreview(w, req)
+
+	if w.Code != http.StatusOK {
+		t.Errorf("Preview tab should return OK, got %d", w.Code)
+	}
+
+	body := w.Body.String()
+	if len(ports) > 0 {
+		if !strings.Contains(body, "preview-iframe") {
+			t.Error("Preview tab should show iframe when ports are detected")
+		}
+	} else {
+		if !strings.Contains(body, "No Application Running") {
+			t.Error("Preview tab should show 'No Application Running' when no ports detected")
+		}
+	}
+}
+
+func TestPreviewProxyWithNoApplication(t *testing.T) {
+	server := flowServer(t)
+
+	// Test the preview proxy endpoint when no application is running
+	req := httptest.NewRequest("GET", "/preview", nil)
+	w := httptest.NewRecorder()
+
+	server.handlePreviewProxy(w, req)
+
+	resp := w.Result()
+	if resp.StatusCode != http.StatusOK {
+		t.Errorf("Expected status 200, got %d", resp.StatusCode)
+	}
+
+	body := w.Body.String()
+
+	// Should show the "No Application Running" message
+	if !strings.Contains(body, "No Application Running") {
+		t.Error("Preview proxy should show 'No Application Running' when no ports detected")
+	}
+
+	if !strings.Contains(body, "Start a web server") {
+		t.Error("Preview proxy should show helpful message about starting a server")
+	}
+}
+
+func TestPreviewPortDetection(t *testing.T) {
+	server := flowServer(t)
+
+	// Initialize workspace session if needed
+	if server.workspaceSession == "" {
+		if err := server.initWorkspaceSession(); err != nil {
+			t.Skipf("Cannot test port detection without workspace session: %v", err)
+		}
+	}
+
+	// Test the detectOpenPorts function
+	ports := server.detectOpenPorts()
+
+	// The result should be an array (possibly empty)
+	if ports == nil {
+		t.Error("detectOpenPorts should return empty slice, not nil")
+	}
+
+	// Verify that common ports are filtered out
+	for _, port := range ports {
+		if port == 8080 || port == 8081 {
+			t.Errorf("Port %d should have been filtered out", port)
+		}
+		if port < 1024 {
+			t.Errorf("System port %d should have been filtered out", port)
+		}
+	}
+
+	t.Logf("Detected ports: %v", ports)
+}

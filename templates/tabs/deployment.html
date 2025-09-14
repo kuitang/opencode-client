@@ -1,93 +1,88 @@
-{{define "tab-deployment"}}
-<div class="max-w-4xl mx-auto">
-    <h2 class="text-2xl font-bold text-gray-900 mb-6">Deployment</h2>
-    
-    <!-- Deployment Status -->
-    <div class="bg-white rounded-lg shadow-lg border border-gray-200 mb-6">
-        <div class="px-6 py-4 border-b border-gray-200 bg-gray-50 rounded-t-lg">
-            <h3 class="text-lg font-semibold text-gray-700">Deployment Status</h3>
+{{/* Component templates defined FIRST (bottom-up) */}}
+{{define "deployment-content"}}
+<div class="p-6">
+    <!-- Deployment Status Section -->
+    <div class="mb-8">
+        <div class="text-center py-8">
+            <div class="w-16 h-16 mx-auto mb-4 bg-gray-100 rounded-full flex items-center justify-center">
+                <svg class="w-8 h-8 text-gray-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M7 16a4 4 0 01-.88-7.903A5 5 0 1115.9 6L16 6a5 5 0 011 9.9M9 19l3 3m0 0l3-3m-3 3V10"/>
+                </svg>
+            </div>
+            <h3 class="text-lg font-medium text-gray-900 mb-2">Ready to Deploy</h3>
+            <p class="text-gray-600 max-w-md mx-auto mb-6">
+                Once you have generated code in the chat, you'll be able to deploy it to various platforms directly from here.
+            </p>
+            <button disabled class="px-6 py-3 bg-gray-300 text-gray-500 rounded-lg cursor-not-allowed min-h-[44px]">
+                No Code to Deploy
+            </button>
         </div>
-        <div class="p-6">
-            <div class="text-center py-8">
-                <div class="w-16 h-16 mx-auto mb-4 bg-gray-100 rounded-full flex items-center justify-center">
-                    <svg class="w-8 h-8 text-gray-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M7 16a4 4 0 01-.88-7.903A5 5 0 1115.9 6L16 6a5 5 0 011 9.9M9 19l3 3m0 0l3-3m-3 3V10"/>
-                    </svg>
+    </div>
+
+    <!-- Deployment Platforms -->
+    <div class="mb-8">
+        <h4 class="text-lg font-semibold text-gray-900 mb-4">Deployment Platforms</h4>
+        <div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
+            <div class="bg-white p-6 rounded-lg border border-gray-200 hover:shadow-md transition-shadow">
+                <div class="flex items-center mb-4">
+                    <div class="w-10 h-10 bg-black rounded-lg flex items-center justify-center">
+                        <svg class="w-6 h-6 text-white" fill="currentColor" viewBox="0 0 24 24">
+                            <path d="M24 22.525H0l12-21.05 12 21.05z"/>
+                        </svg>
+                    </div>
+                    <div class="ml-3">
+                        <h4 class="font-semibold text-gray-900">Vercel</h4>
+                        <p class="text-sm text-gray-600">Frontend deployment</p>
+                    </div>
                 </div>
-                <h3 class="text-lg font-medium text-gray-900 mb-2">Ready to Deploy</h3>
-                <p class="text-gray-600 max-w-md mx-auto mb-6">
-                    Once you have generated code in the chat, you'll be able to deploy it to various platforms directly from here.
-                </p>
-                <button disabled class="px-6 py-3 bg-gray-300 text-gray-500 rounded-lg cursor-not-allowed min-h-[44px]">
-                    No Code to Deploy
+                <p class="text-sm text-gray-700 mb-4">Deploy static sites and serverless functions instantly to Vercel's global edge network.</p>
+                <button disabled class="w-full py-2 px-4 bg-gray-100 text-gray-400 rounded-md text-sm cursor-not-allowed min-h-[44px]">
+                    Connect Account
+                </button>
+            </div>
+
+            <div class="bg-white p-6 rounded-lg border border-gray-200 hover:shadow-md transition-shadow">
+                <div class="flex items-center mb-4">
+                    <div class="w-10 h-10 bg-orange-500 rounded-lg flex items-center justify-center">
+                        <svg class="w-6 h-6 text-white" fill="currentColor" viewBox="0 0 24 24">
+                            <path d="M12.017 0C5.396 0 .029 5.367.029 11.987c0 5.079 3.158 9.417 7.618 11.174-.105-.949-.199-2.403.041-3.439.219-.937 1.219-5.175 1.219-5.175s-.31-.219-.31-.219c0-1.709.994-2.985 2.233-2.985 1.052 0 1.560.219 1.560 1.719 0 1.052-.219 2.622-.219 4.041-.219 1.719 1.394 3.127 3.127 3.127 3.760 0 6.278-4.041 6.278-9.894 0-4.124-2.994-7.618-8.122-7.618-5.906 0-9.456 4.330-9.456 9.111 0 1.719.219 2.841.793 3.760.219.310.219.415.151.793-.041.219-.151.615-.310.793-.151.310-.615.041-.615.041C3.667 18.815 1.987 15.389 1.987 11.987c0-6.037 4.330-10.908 12.030-10.908 6.647 0 11.662 4.751 11.662 10.908 0 6.278-3.917 10.908-9.456 10.908-1.876 0-3.639-.994-4.330-2.233 0 0-.954 3.760-1.172 4.330-.415 1.560-1.560 3.760-2.325 5.175 1.719.615 3.627.954 5.906.954C18.624 24.013 24.013 18.624 24.013 11.987 24.013 5.367 18.624.029 12.017 0z"/>
+                        </svg>
+                    </div>
+                    <div class="ml-3">
+                        <h4 class="font-semibold text-gray-900">Netlify</h4>
+                        <p class="text-sm text-gray-600">JAMstack platform</p>
+                    </div>
+                </div>
+                <p class="text-sm text-gray-700 mb-4">Build, deploy, and manage modern web projects with automatic deployments from Git.</p>
+                <button disabled class="w-full py-2 px-4 bg-gray-100 text-gray-400 rounded-md text-sm cursor-not-allowed min-h-[44px]">
+                    Connect Account
+                </button>
+            </div>
+
+            <div class="bg-white p-6 rounded-lg border border-gray-200 hover:shadow-md transition-shadow">
+                <div class="flex items-center mb-4">
+                    <div class="w-10 h-10 bg-purple-600 rounded-lg flex items-center justify-center">
+                        <svg class="w-6 h-6 text-white" fill="currentColor" viewBox="0 0 24 24">
+                            <path d="M12.017 0C5.396 0 .029 5.367.029 11.987c0 5.079 3.158 9.417 7.618 11.174-.105-.949-.199-2.403.041-3.439.219-.937 1.219-5.175 1.219-5.175s-.31-.219-.31-.219c0-1.709.994-2.985 2.233-2.985 1.052 0 1.560.219 1.560 1.719 0 1.052-.219 2.622-.219 4.041-.219 1.719 1.394 3.127 3.127 3.127 3.760 0 6.278-4.041 6.278-9.894 0-4.124-2.994-7.618-8.122-7.618-5.906 0-9.456 4.330-9.456 9.111 0 1.719.219 2.841.793 3.760.219.310.219.415.151.793-.041.219-.151.615-.310.793-.151.310-.615.041-.615.041C3.667 18.815 1.987 15.389 1.987 11.987c0-6.037 4.330-10.908 12.030-10.908 6.647 0 11.662 4.751 11.662 10.908 0 6.278-3.917 10.908-9.456 10.908-1.876 0-3.639-.994-4.330-2.233 0 0-.954 3.760-1.172 4.330-.415 1.560-1.560 3.760-2.325 5.175 1.719.615 3.627.954 5.906.954C18.624 24.013 24.013 18.624 24.013 11.987 24.013 5.367 18.624.029 12.017 0z"/>
+                        </svg>
+                    </div>
+                    <div class="ml-3">
+                        <h4 class="font-semibold text-gray-900">Railway</h4>
+                        <p class="text-sm text-gray-600">Full-stack hosting</p>
+                    </div>
+                </div>
+                <p class="text-sm text-gray-700 mb-4">Deploy web apps, databases, and services with zero configuration required.</p>
+                <button disabled class="w-full py-2 px-4 bg-gray-100 text-gray-400 rounded-md text-sm cursor-not-allowed min-h-[44px]">
+                    Connect Account
                 </button>
             </div>
         </div>
     </div>
-    
-    <!-- Deployment Platforms -->
-    <div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6 mb-6">
-        <div class="bg-white p-6 rounded-lg border border-gray-200 hover:shadow-md transition-shadow">
-            <div class="flex items-center mb-4">
-                <div class="w-10 h-10 bg-black rounded-lg flex items-center justify-center">
-                    <svg class="w-6 h-6 text-white" fill="currentColor" viewBox="0 0 24 24">
-                        <path d="M24 22.525H0l12-21.05 12 21.05z"/>
-                    </svg>
-                </div>
-                <div class="ml-3">
-                    <h4 class="font-semibold text-gray-900">Vercel</h4>
-                    <p class="text-sm text-gray-600">Frontend deployment</p>
-                </div>
-            </div>
-            <p class="text-sm text-gray-700 mb-4">Deploy static sites and serverless functions instantly to Vercel's global edge network.</p>
-            <button disabled class="w-full py-2 px-4 bg-gray-100 text-gray-400 rounded-md text-sm cursor-not-allowed min-h-[44px]">
-                Connect Account
-            </button>
-        </div>
-        
-        <div class="bg-white p-6 rounded-lg border border-gray-200 hover:shadow-md transition-shadow">
-            <div class="flex items-center mb-4">
-                <div class="w-10 h-10 bg-orange-500 rounded-lg flex items-center justify-center">
-                    <svg class="w-6 h-6 text-white" fill="currentColor" viewBox="0 0 24 24">
-                        <path d="M12.017 0C5.396 0 .029 5.367.029 11.987c0 5.079 3.158 9.417 7.618 11.174-.105-.949-.199-2.403.041-3.439.219-.937 1.219-5.175 1.219-5.175s-.31-.219-.31-.219c0-1.709.994-2.985 2.233-2.985 1.052 0 1.560.219 1.560 1.719 0 1.052-.219 2.622-.219 4.041-.219 1.719 1.394 3.127 3.127 3.127 3.760 0 6.278-4.041 6.278-9.894 0-4.124-2.994-7.618-8.122-7.618-5.906 0-9.456 4.330-9.456 9.111 0 1.719.219 2.841.793 3.760.219.310.219.415.151.793-.041.219-.151.615-.310.793-.151.310-.615.041-.615.041C3.667 18.815 1.987 15.389 1.987 11.987c0-6.037 4.330-10.908 12.030-10.908 6.647 0 11.662 4.751 11.662 10.908 0 6.278-3.917 10.908-9.456 10.908-1.876 0-3.639-.994-4.330-2.233 0 0-.954 3.760-1.172 4.330-.415 1.560-1.560 3.760-2.325 5.175 1.719.615 3.627.954 5.906.954C18.624 24.013 24.013 18.624 24.013 11.987 24.013 5.367 18.624.029 12.017 0z"/>
-                    </svg>
-                </div>
-                <div class="ml-3">
-                    <h4 class="font-semibold text-gray-900">Netlify</h4>
-                    <p class="text-sm text-gray-600">JAMstack platform</p>
-                </div>
-            </div>
-            <p class="text-sm text-gray-700 mb-4">Build, deploy, and manage modern web projects with automatic deployments from Git.</p>
-            <button disabled class="w-full py-2 px-4 bg-gray-100 text-gray-400 rounded-md text-sm cursor-not-allowed min-h-[44px]">
-                Connect Account
-            </button>
-        </div>
-        
-        <div class="bg-white p-6 rounded-lg border border-gray-200 hover:shadow-md transition-shadow">
-            <div class="flex items-center mb-4">
-                <div class="w-10 h-10 bg-purple-600 rounded-lg flex items-center justify-center">
-                    <svg class="w-6 h-6 text-white" fill="currentColor" viewBox="0 0 24 24">
-                        <path d="M12.017 0C5.396 0 .029 5.367.029 11.987c0 5.079 3.158 9.417 7.618 11.174-.105-.949-.199-2.403.041-3.439.219-.937 1.219-5.175 1.219-5.175s-.31-.219-.31-.219c0-1.709.994-2.985 2.233-2.985 1.052 0 1.560.219 1.560 1.719 0 1.052-.219 2.622-.219 4.041-.219 1.719 1.394 3.127 3.127 3.127 3.760 0 6.278-4.041 6.278-9.894 0-4.124-2.994-7.618-8.122-7.618-5.906 0-9.456 4.330-9.456 9.111 0 1.719.219 2.841.793 3.760.219.310.219.415.151.793-.041.219-.151.615-.310.793-.151.310-.615.041-.615.041C3.667 18.815 1.987 15.389 1.987 11.987c0-6.037 4.330-10.908 12.030-10.908 6.647 0 11.662 4.751 11.662 10.908 0 6.278-3.917 10.908-9.456 10.908-1.876 0-3.639-.994-4.330-2.233 0 0-.954 3.760-1.172 4.330-.415 1.560-1.560 3.760-2.325 5.175 1.719.615 3.627.954 5.906.954C18.624 24.013 24.013 18.624 24.013 11.987 24.013 5.367 18.624.029 12.017 0z"/>
-                    </svg>
-                </div>
-                <div class="ml-3">
-                    <h4 class="font-semibold text-gray-900">Railway</h4>
-                    <p class="text-sm text-gray-600">Full-stack hosting</p>
-                </div>
-            </div>
-            <p class="text-sm text-gray-700 mb-4">Deploy web apps, databases, and services with zero configuration required.</p>
-            <button disabled class="w-full py-2 px-4 bg-gray-100 text-gray-400 rounded-md text-sm cursor-not-allowed min-h-[44px]">
-                Connect Account
-            </button>
-        </div>
-    </div>
-    
+
     <!-- Deployment History -->
-    <div class="bg-white rounded-lg shadow-lg border border-gray-200">
-        <div class="px-6 py-4 border-b border-gray-200 bg-gray-50 rounded-t-lg">
-            <h3 class="text-lg font-semibold text-gray-700">Deployment History</h3>
-        </div>
-        <div class="p-6">
+    <div class="mb-8">
+        <h4 class="text-lg font-semibold text-gray-900 mb-4">Deployment History</h4>
+        <div class="bg-gray-50 rounded-lg border border-gray-200 p-6">
             <div class="text-center py-8">
                 <svg class="w-12 h-12 mx-auto text-gray-400 mb-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                     <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z"/>
@@ -97,9 +92,9 @@
             </div>
         </div>
     </div>
-    
-    <!-- Quick Deploy Actions -->
-    <div class="mt-6 bg-blue-50 border border-blue-200 rounded-lg p-6">
+
+    <!-- Getting Started Info -->
+    <div class="bg-blue-50 border border-blue-200 rounded-lg p-6">
         <div class="flex items-start">
             <div class="flex-shrink-0">
                 <svg class="w-6 h-6 text-blue-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
@@ -120,5 +115,14 @@
             </div>
         </div>
     </div>
+</div>
+{{end}}
+
+{{/* Main template defined AFTER components (top-level) */}}
+{{define "tab-deployment"}}
+<div class="max-w-4xl mx-auto">
+    {{template "mac-chrome" (dict
+        "Title" "Deployment"
+        "MainContent" (renderComponent "deployment-content" .))}}
 </div>
 {{end}}

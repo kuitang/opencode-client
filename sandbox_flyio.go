@@ -143,6 +143,15 @@ func (fs *FlyIOSandbox) OpencodeURL() string {
 	return fs.url
 }
 
+// GottyURL returns the HTTP URL for accessing the Gotty terminal interface
+func (fs *FlyIOSandbox) GottyURL() string {
+	// FUTURE IMPLEMENTATION:
+	// Gotty terminal would be available at a separate path on the same domain
+	// Format: https://{app-name}.fly.dev/gotty
+	// This requires configuring routing in the Fly.io machine
+	return ""
+}
+
 // DownloadZip creates a zip archive of the sandbox working directory
 func (fs *FlyIOSandbox) DownloadZip() (io.ReadCloser, error) {
 	// FUTURE IMPLEMENTATION PLAN:
@@ -309,6 +318,12 @@ func (fs *FlyIOSandbox) IsRunning() bool {
 	// }
 
 	return false
+}
+
+// ContainerIP returns empty string for Fly.io sandbox (not applicable)
+func (fs *FlyIOSandbox) ContainerIP() string {
+	// Fly.io doesn't use local containers, return empty
+	return ""
 }
 
 // HELPER TYPES FOR FUTURE IMPLEMENTATION:
