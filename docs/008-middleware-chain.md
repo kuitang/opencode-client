@@ -79,7 +79,7 @@ Both maps live behind the shared `Server.mu` and are populated by cookie value. 
 
 ## Testing Strategy
 
-- `unit_server_test.go`
+- `unit_test.go`
   - Validates `chainMiddleware` order (`TestChainMiddlewareOrder`).
   - Exercises `loggingMiddleware` for normal and SSE endpoints using the production wrapper.
   - Confirms `requireAuth` blocks anonymous requests and passes authenticated ones when composed with `withAuth`.

@@ -21,9 +21,18 @@ npx playwright install
 
 ## Running The Suite
 
+### Go Tests
+
+```bash
+make test-unit         # Unit tests (no Docker)
+make test-integration  # Integration tests (Docker + auth.json)
+```
+
+### Playwright UI Tests
+
 ```bash
 # Headless run against the server on port 6666
-CI=1 PLAYWRIGHT_BASE_URL=http://localhost:6666 npx playwright test
+make test-ui
 
 # Headed/debug mode (Chromium window)
 PLAYWRIGHT_BASE_URL=http://localhost:6666 npm run test:ui:headed

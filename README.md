@@ -12,11 +12,10 @@ A web-based chat interface for OpenCode using Go and HTMX.
 │   └── message.html                # Reusable message bubble partial
 ├── static/                         # Static assets
 │   └── styles.css                 # CSS styles
-├── integration_http_test.go        # Mocked HTTP/SSE rendering tests (no Docker)
-├── integration_flow_test.go        # Regular flow tests (one sandbox/server per file)
-├── integration_race_signal_test.go # Race condition + signal tests (one sandbox/server per file)
+├── integration_test.go             # Consolidated integration suites (mocked + real sandbox)
 ├── test_suite_helpers.go           # Per-file suite server helper (RealSuiteServer)
 ├── suite_main_test.go              # Global cleanup for suite servers
+├── unit_test.go                    # Consolidated unit tests
 └── go.mod                          # Go module dependencies
 ```
 
@@ -79,14 +78,8 @@ go build -o opencode-chat
 
 There are two categories of tests:
 
-- Unit tests (no Docker): consolidated into three files
-  - `unit_rendering_test.go` — templates, UI, and rendering pipeline
-  - `unit_server_test.go` — logging, message parts, readiness helpers
-  - `unit_race_test.go` — rate limiter and SSE duplication/concurrency
-- Integration tests:
-  - Mocked HTTP/SSE (fast; no Docker): `integration_http_test.go`
-  - Flow (real sandbox; Docker + auth.json): `integration_flow_test.go`
-  - Race/Signals (real sandbox; signals + full app): `integration_race_signal_test.go`
+- Unit tests (no Docker): `unit_test.go` — rendering, server helpers, concurrency primitives
+- Integration tests (Docker when required): `integration_test.go` — mocked HTTP/SSE flows, real sandbox flows, and race/signal coverage
 
 Integration suites start exactly one real sandbox/server per file via `RealSuiteServer`, so tests within a file do not repeatedly start Docker.
 
@@ -96,17 +89,14 @@ Integration suites start exactly one real sandbox/server per file via `RealSuite
 # All tests (about ~30s on a warm Docker)
 go test -v ./...
 
-# Fast mocked tests only (no Docker)
-make test-fast
-
 # Unit tests only (no Docker; consolidated)
 make test-unit
 
-# Flow suite (real sandbox; requires Docker and ~/.local/share/opencode/auth.json)
-make test-flow
+# Integration suite (real sandbox; requires Docker and ~/.local/share/opencode/auth.json)
+make test-integration
 
-# Race + Signals (real sandbox; signals build and run the app)
-make test-race-signal
+# Playwright UI tests (requires Node + Playwright browsers)
+make test-ui
 
 # Race detector
 make test-race
@@ -119,34 +109,19 @@ Notes:
 - Real-sandbox tests require Docker and a valid OpenCode auth.json at `~/.local/share/opencode/auth.json`.
 - Tests select a supported provider/model at runtime (no hard-coded model IDs).
 - SSE tests are bounded by context timeouts and do not hang.
- - Unit tests cover rendering, server helpers, and concurrency primitives without requiring Docker.
+- Unit tests cover rendering, server helpers, and concurrency primitives without requiring Docker.
+- Integration tests spin up one sandbox per suite file; ensure Docker and `~/.local/share/opencode/auth.json` are available.
+- The CI workflow populates `~/.local/share/opencode/auth.json` from the `OPENCODE_API_KEY` environment variable (falls back to a dummy key if unset).
 
 ### Playwright UI Tests
 
-The project includes comprehensive Playwright tests in `test_resize_scenarios.js` for validating UI stability, scroll preservation, and responsive behavior. These tests cover:
-
-- **Scroll Position Preservation**: Ensures scroll positions are maintained across mobile/desktop transitions
-- **Resize Debouncing**: Validates that rapid viewport changes don't cause UI flickering
-- **Input Protection**: Verifies chat doesn't minimize when user has active text input
-- **Race Condition Handling**: Tests complex interactions like scrolling while resizing
-
-To run Playwright tests:
+The Playwright specs under `test/ui/*.spec.js` cover dropdown behaviour, preview/terminal flows, responsive layout, and SSE scrolling. Run them headlessly with:
 
 ```bash
-# 1. Start the server
-go build -o opencode-chat *.go && ./opencode-chat -port 8080
-
-# 2. Run tests with Playwright (requires Playwright installed)
-# Either use Playwright directly or Claude Code's Playwright MCP:
-# - Navigate to http://localhost:8080
-# - Execute test functions from test_resize_scenarios.js
-
-# Key test functions:
-# - testScrollPositionPreservation() - Critical scroll preservation test
-# - testRapidResizeTransitions() - Tests debounce mechanism
-# - testComplexInteractions() - Tests race conditions
-# - runAllTests() - Runs complete test suite
+make test-ui
 ```
+
+This target builds the server, runs it on port `6666`, executes the Playwright suite (`CI=1 PLAYWRIGHT_BASE_URL=http://localhost:6666`), and tears the server down afterward.
 
 ## Design Decisions
 
@@ -154,7 +129,7 @@ go build -o opencode-chat *.go && ./opencode-chat -port 8080
 2. **Reusable message partial**: Single message template used across all rendering paths
 3. **Embedded files**: Templates and static files are embedded in the binary for easy deployment
 4. **Constructor pattern**: `NewServer()` ensures proper initialization of templates
-5. **Test organization**: Three suites (mocked HTTP, flow, race/signals) with one sandbox per file
+5. **Test organization**: Two Go suites (`unit_test.go`, `integration_test.go`) plus Playwright UI coverage; each integration suite spins up a single sandbox per file.
 6. **HTMX-only approach**: All UI updates via HTML fragments, no JSON APIs
 7. **Port offset strategy**: OpenCode port = HTTP port + 1000 for predictability
 

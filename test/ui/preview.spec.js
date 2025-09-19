@@ -62,7 +62,7 @@ test.describe('Preview tab experience', () => {
       const killButton = page.getByRole('button', { name: 'Kill' });
       await expect(killButton).toBeVisible({ timeout: BASE_TIMEOUT });
 
-      await killButton.click();
+      await killButton.click({ noWaitAfter: true });
 
       await expect(page.getByText('No Application Running', { exact: false })).toBeVisible({ timeout: BASE_TIMEOUT });
       cleanupNeeded = false;
