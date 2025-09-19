@@ -1,6 +1,7 @@
 package main
 
 import (
+	"context"
 	"crypto/rand"
 	"encoding/hex"
 	"net/http"
@@ -11,6 +12,14 @@ import (
 type AuthSession struct {
 	Email     string
 	CreatedAt time.Time
+}
+
+type authContextKey struct{}
+
+// AuthContext holds authentication data for a request lifecycle.
+type AuthContext struct {
+	Session         *AuthSession
+	IsAuthenticated bool
 }
 
 // isAuthenticated checks if the user has a valid auth session
@@ -40,6 +49,24 @@ func (s *Server) getAuthSession(r *http.Request) (*AuthSession, bool) {
 
 	session, exists := s.authSessions[cookie.Value]
 	return session, exists
+}
+
+// withAuth attaches authentication state to the request context for downstream handlers.
+func (s *Server) withAuth(next http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		session, ok := s.getAuthSession(r)
+		authCtx := AuthContext{Session: session, IsAuthenticated: ok}
+		ctx := context.WithValue(r.Context(), authContextKey{}, authCtx)
+		next.ServeHTTP(w, r.WithContext(ctx))
+	})
+}
+
+// authContext extracts authentication context from the request.
+func authContext(r *http.Request) AuthContext {
+	if ctx, ok := r.Context().Value(authContextKey{}).(AuthContext); ok {
+		return ctx
+	}
+	return AuthContext{}
 }
 
 // createAuthSession creates a new auth session for a user
@@ -86,14 +113,20 @@ func (s *Server) clearAuthSession(w http.ResponseWriter, r *http.Request) {
 }
 
 // requireAuth is middleware that ensures the user is authenticated
-func (s *Server) requireAuth(next http.HandlerFunc) http.HandlerFunc {
-	return func(w http.ResponseWriter, r *http.Request) {
-		if !s.isAuthenticated(r) {
-			http.Redirect(w, r, "/login", http.StatusSeeOther)
+func (s *Server) requireAuth(next http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if authCtx := authContext(r); authCtx.IsAuthenticated {
+			next.ServeHTTP(w, r)
 			return
 		}
-		next(w, r)
-	}
+
+		if s.isAuthenticated(r) {
+			next.ServeHTTP(w, r)
+			return
+		}
+
+		http.Redirect(w, r, "/login", http.StatusSeeOther)
+	})
 }
 
 // generateSessionID creates a secure random session ID

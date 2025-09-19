@@ -90,24 +90,14 @@ func TestLoggingMiddleware_NormalEndpoint(t *testing.T) {
 	var logOutput bytes.Buffer
 	log.SetOutput(&logOutput)
 	defer log.SetOutput(os.Stderr)
-	handler := func(w http.ResponseWriter, r *http.Request) { w.WriteHeader(200); w.Write([]byte("Normal response")) }
-	loggingMiddleware := func(handler http.HandlerFunc) http.HandlerFunc {
-		return func(w http.ResponseWriter, r *http.Request) {
-			if r.URL.Path == "/events" {
-				log.Printf("WIRE_OUT SSE connection started: %s %s", r.Method, r.URL.Path)
-				handler(w, r)
-				log.Printf("WIRE_OUT SSE connection ended: %s %s", r.Method, r.URL.Path)
-				return
-			}
-			lw := NewLoggingResponseWriter(w)
-			handler(lw, r)
-			lw.LogResponse(r.Method, r.URL.Path)
-		}
-	}
+	handler := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(200)
+		w.Write([]byte("Normal response"))
+	})
 	req := httptest.NewRequest("GET", "/normal", nil)
 	recorder := httptest.NewRecorder()
 	wrappedHandler := loggingMiddleware(handler)
-	wrappedHandler(recorder, req)
+	wrappedHandler.ServeHTTP(recorder, req)
 	if recorder.Code != 200 {
 		t.Errorf("Expected status code 200, got %d", recorder.Code)
 	}
@@ -123,28 +113,15 @@ func TestLoggingMiddleware_SSEEndpoint(t *testing.T) {
 	var logOutput bytes.Buffer
 	log.SetOutput(&logOutput)
 	defer log.SetOutput(os.Stderr)
-	handler := func(w http.ResponseWriter, r *http.Request) {
+	handler := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "text/event-stream")
 		w.WriteHeader(200)
 		w.Write([]byte("data: SSE message\n\n"))
-	}
-	loggingMiddleware := func(handler http.HandlerFunc) http.HandlerFunc {
-		return func(w http.ResponseWriter, r *http.Request) {
-			if r.URL.Path == "/events" {
-				log.Printf("WIRE_OUT SSE connection started: %s %s", r.Method, r.URL.Path)
-				handler(w, r)
-				log.Printf("WIRE_OUT SSE connection ended: %s %s", r.Method, r.URL.Path)
-				return
-			}
-			lw := NewLoggingResponseWriter(w)
-			handler(lw, r)
-			lw.LogResponse(r.Method, r.URL.Path)
-		}
-	}
+	})
 	req := httptest.NewRequest("GET", "/events", nil)
 	recorder := httptest.NewRecorder()
 	wrappedHandler := loggingMiddleware(handler)
-	wrappedHandler(recorder, req)
+	wrappedHandler.ServeHTTP(recorder, req)
 	if recorder.Code != 200 {
 		t.Errorf("Expected status code 200, got %d", recorder.Code)
 	}
@@ -161,6 +138,127 @@ func TestLoggingMiddleware_SSEEndpoint(t *testing.T) {
 	if strings.Contains(logStr, "WIRE_OUT GET /events [200]:") {
 		t.Errorf("SSE endpoint should not use normal response logging, but does: %s", logStr)
 	}
+}
+
+func TestChainMiddlewareOrder(t *testing.T) {
+	var order []string
+	handler := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		order = append(order, "handler")
+	})
+	m1 := func(next http.Handler) http.Handler {
+		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			order = append(order, "m1 before")
+			next.ServeHTTP(w, r)
+			order = append(order, "m1 after")
+		})
+	}
+	m2 := func(next http.Handler) http.Handler {
+		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			order = append(order, "m2 before")
+			next.ServeHTTP(w, r)
+			order = append(order, "m2 after")
+		})
+	}
+	req := httptest.NewRequest("GET", "/", nil)
+	recorder := httptest.NewRecorder()
+	chainMiddleware(handler, m1, m2).ServeHTTP(recorder, req)
+	expected := []string{"m1 before", "m2 before", "handler", "m2 after", "m1 after"}
+	if len(order) != len(expected) {
+		t.Fatalf("expected %d entries, got %d", len(expected), len(order))
+	}
+	for i := range expected {
+		if order[i] != expected[i] {
+			t.Fatalf("expected order[%d]=%q, got %q (full order=%v)", i, expected[i], order[i], order)
+		}
+	}
+}
+
+func TestRequireAuthRedirectsWhenUnauthenticated(t *testing.T) {
+	server := &Server{
+		authSessions: make(map[string]*AuthSession),
+	}
+	nextCalled := false
+	next := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		nextCalled = true
+	})
+	req := httptest.NewRequest("GET", "/protected", nil)
+	recorder := httptest.NewRecorder()
+	chainMiddleware(next, server.withAuth, server.requireAuth).ServeHTTP(recorder, req)
+	if nextCalled {
+		t.Fatal("expected next handler not to be called for unauthenticated request")
+	}
+	if recorder.Code != http.StatusSeeOther {
+		t.Fatalf("expected status %d, got %d", http.StatusSeeOther, recorder.Code)
+	}
+	location := recorder.Header().Get("Location")
+	if location != "/login" {
+		t.Fatalf("expected redirect to /login, got %q", location)
+	}
+}
+
+func TestRequireAuthAllowsAuthenticated(t *testing.T) {
+	server := &Server{
+		authSessions: make(map[string]*AuthSession),
+	}
+	server.authSessions["token"] = &AuthSession{Email: "user@example.com"}
+	nextCalled := false
+	next := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		nextCalled = true
+	})
+	req := httptest.NewRequest("GET", "/protected", nil)
+	req.AddCookie(&http.Cookie{Name: "auth_session", Value: "token"})
+	recorder := httptest.NewRecorder()
+	chainMiddleware(next, server.withAuth, server.requireAuth).ServeHTTP(recorder, req)
+	if !nextCalled {
+		t.Fatal("expected next handler to be called for authenticated request")
+	}
+	if recorder.Code != http.StatusOK {
+		t.Fatalf("expected status %d, got %d", http.StatusOK, recorder.Code)
+	}
+}
+
+func TestWithAuthSetsContextForAuthenticatedUser(t *testing.T) {
+	server := &Server{
+		authSessions: make(map[string]*AuthSession),
+	}
+	server.authSessions["token"] = &AuthSession{Email: "user@example.com"}
+
+	req := httptest.NewRequest("GET", "/", nil)
+	req.AddCookie(&http.Cookie{Name: "auth_session", Value: "token"})
+	recorder := httptest.NewRecorder()
+	handlerCalled := false
+	handler := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		handlerCalled = true
+		ctx := authContext(r)
+		if !ctx.IsAuthenticated {
+			t.Fatal("expected request to be authenticated")
+		}
+		if ctx.Session == nil || ctx.Session.Email != "user@example.com" {
+			t.Fatalf("unexpected auth session %+v", ctx.Session)
+		}
+	})
+	chainMiddleware(handler, server.withAuth).ServeHTTP(recorder, req)
+	if !handlerCalled {
+		t.Fatal("expected handler to be called")
+	}
+}
+
+func TestWithAuthSetsContextForAnonymousUser(t *testing.T) {
+	server := &Server{
+		authSessions: make(map[string]*AuthSession),
+	}
+	req := httptest.NewRequest("GET", "/", nil)
+	recorder := httptest.NewRecorder()
+	handler := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		ctx := authContext(r)
+		if ctx.IsAuthenticated {
+			t.Fatal("expected request to be anonymous")
+		}
+		if ctx.Session != nil {
+			t.Fatalf("expected no auth session, got %+v", ctx.Session)
+		}
+	})
+	chainMiddleware(handler, server.withAuth).ServeHTTP(recorder, req)
 }
 
 func TestNewLoggingResponseWriter(t *testing.T) {

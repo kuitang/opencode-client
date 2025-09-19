@@ -4,7 +4,11 @@ The JavaScript-based UI test suite is now fully managed by Playwright. Every bro
 
 ## Prerequisites
 
-1. Ensure the Go server is running locally (defaults to `http://localhost:8080`).
+1. Start the Go server on a non-conflicting port (we reserve `6666` for UI test runs):
+
+   ```bash
+   ./opencode-chat -port 6666
+   ```
 2. Install Node.js 18+.
 3. Install the test dependencies and browser binaries:
 
@@ -18,14 +22,14 @@ npx playwright install
 ## Running The Suite
 
 ```bash
-# Headless run
-npm run test:ui
+# Headless run against the server on port 6666
+CI=1 PLAYWRIGHT_BASE_URL=http://localhost:6666 npx playwright test
 
-# Headed/debug mode
-npm run test:ui:headed
+# Headed/debug mode (Chromium window)
+PLAYWRIGHT_BASE_URL=http://localhost:6666 npm run test:ui:headed
 
 # Filter specific specs
-npx playwright test test/ui/preview.spec.js
+CI=1 PLAYWRIGHT_BASE_URL=http://localhost:6666 npx playwright test test/ui/preview.spec.js
 ```
 
 The Playwright config (`playwright.config.js`) pins the test directory to `test/ui`, uses Chromium by default, and limits execution to a single worker to avoid cross-test interference with the shared sandbox.

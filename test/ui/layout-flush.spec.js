@@ -1,11 +1,17 @@
 const { test, expect } = require('@playwright/test');
+const { resolveBaseURL } = require('./helpers/navigation');
 
 async function checkAlignment(page) {
   return page.evaluate(() => {
     const chatHeader = document.querySelector('header');
-    const tabNav = document.querySelector('nav');
+    const tabNav = document.querySelector('[data-testid="tab-navigation"]');
     if (!chatHeader || !tabNav) {
-      return { ok: false, reason: 'Missing header or nav' };
+      return {
+        ok: false,
+        reason: 'Missing header or nav',
+        headerPresent: !!chatHeader,
+        navPresent: !!tabNav,
+      };
     }
 
     const headerRect = chatHeader.getBoundingClientRect();
@@ -17,14 +23,18 @@ async function checkAlignment(page) {
       difference,
       headerHeight: headerRect.height,
       navHeight: navRect.height,
+      headerPresent: true,
+      navPresent: true,
     };
   });
 }
 
 test.describe('Layout alignment', () => {
   test.beforeEach(async ({ page }, testInfo) => {
-    await page.goto(testInfo.config.use.baseURL, { waitUntil: 'domcontentloaded' });
+    const baseURL = resolveBaseURL(testInfo);
+    await page.goto(baseURL, { waitUntil: 'domcontentloaded' });
     await page.waitForSelector('header');
+    await page.waitForSelector('[data-testid="tab-navigation"]');
   });
 
   test('chat header and tab nav are flush on desktop', async ({ page }) => {

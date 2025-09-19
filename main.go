@@ -31,16 +31,16 @@ var templateFS embed.FS
 var staticFS embed.FS
 
 type Server struct {
-	sandbox           Sandbox              // Sandbox instance for secure code execution
-	sessions          map[string]string    // cookie -> opencode session ID (for chat)
+	sandbox           Sandbox                 // Sandbox instance for secure code execution
+	sessions          map[string]string       // cookie -> opencode session ID (for chat)
 	authSessions      map[string]*AuthSession // cookie -> auth session
-	selectedFiles     map[string]string    // cookie -> currently selected file path
-	workspaceSession  string               // Shared workspace session ID for file operations
+	selectedFiles     map[string]string       // cookie -> currently selected file path
+	workspaceSession  string                  // Shared workspace session ID for file operations
 	mu                sync.RWMutex
 	providers         []Provider
 	defaultModel      map[string]string
 	templates         *template.Template
-	codeUpdateLimiter *UpdateRateLimiter   // Rate limiter for code tab SSE updates
+	codeUpdateLimiter *UpdateRateLimiter // Rate limiter for code tab SSE updates
 }
 
 type Provider struct {
@@ -226,6 +226,22 @@ func (lw *LoggingResponseWriter) Write(data []byte) (int, error) {
 func (lw *LoggingResponseWriter) LogResponse(method, path string) {
 	bodyStr := lw.body.String()
 	log.Printf("WIRE_OUT %s %s [%d]: %s", method, path, lw.statusCode, bodyStr)
+}
+
+func loggingMiddleware(next http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		// Special handling for SSE endpoint - don't buffer the entire stream
+		if r.URL.Path == "/events" {
+			log.Printf("WIRE_OUT SSE connection started: %s %s", r.Method, r.URL.Path)
+			next.ServeHTTP(w, r)
+			log.Printf("WIRE_OUT SSE connection ended: %s %s", r.Method, r.URL.Path)
+			return
+		}
+
+		lw := NewLoggingResponseWriter(w)
+		next.ServeHTTP(lw, r)
+		lw.LogResponse(r.Method, r.URL.Path)
+	})
 }
 
 // NewServer creates a new Server instance with properly initialized templates
@@ -659,6 +675,8 @@ func (s *Server) handleIndex(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	authCtx := authContext(r)
+
 	// Get existing messages
 	messagesHTML := s.getMessagesHTML(sessionID)
 
@@ -670,13 +688,10 @@ func (s *Server) handleIndex(w http.ResponseWriter, r *http.Request) {
 		log.Printf("handleIndex: Detected preview port %d", previewPort)
 	}
 
-	// Check authentication status
-	isAuthenticated := s.isAuthenticated(r)
+	// Derive user initial from authentication context
 	userInitial := ""
-	if isAuthenticated {
-		if authSession, ok := s.getAuthSession(r); ok && len(authSession.Email) > 0 {
-			userInitial = strings.ToUpper(string(authSession.Email[0]))
-		}
+	if authCtx.IsAuthenticated && authCtx.Session != nil && len(authCtx.Session.Email) > 0 {
+		userInitial = strings.ToUpper(string(authCtx.Session.Email[0]))
 	}
 
 	// Prepare template data
@@ -692,7 +707,7 @@ func (s *Server) handleIndex(w http.ResponseWriter, r *http.Request) {
 		DefaultModel:    "anthropic/claude-sonnet-4-20250514", // Default to Claude Sonnet 4
 		MessagesHTML:    template.HTML(messagesHTML),
 		PreviewPort:     previewPort,
-		IsAuthenticated: isAuthenticated,
+		IsAuthenticated: authCtx.IsAuthenticated,
 		UserInitial:     userInitial,
 	}
 
@@ -1285,8 +1300,9 @@ func (s *Server) handleKillPreviewPort(w http.ResponseWriter, r *http.Request) {
 // handleLogin shows the login page or processes login
 func (s *Server) handleLogin(w http.ResponseWriter, r *http.Request) {
 	if r.Method == "GET" {
+		authCtx := authContext(r)
 		// Check if already logged in
-		if s.isAuthenticated(r) {
+		if authCtx.IsAuthenticated {
 			http.Redirect(w, r, "/projects", http.StatusSeeOther)
 			return
 		}
@@ -1344,14 +1360,9 @@ func (s *Server) handleProjects(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Check authentication
-	if !s.isAuthenticated(r) {
-		http.Redirect(w, r, "/login", http.StatusSeeOther)
-		return
-	}
-
-	// Get user session
-	authSession, _ := s.getAuthSession(r)
+	// Get user session from request context
+	authCtx := authContext(r)
+	authSession := authCtx.Session
 
 	// Extract user initial from email
 	userInitial := "U"

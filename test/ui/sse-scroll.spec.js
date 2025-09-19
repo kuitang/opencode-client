@@ -1,4 +1,5 @@
 const { test, expect } = require('@playwright/test');
+const { resolveBaseURL } = require('./helpers/navigation');
 
 async function runScrollChecks(page) {
   return page.evaluate(async () => {
@@ -68,7 +69,8 @@ async function runScrollChecks(page) {
 
 test.describe('SSE scroll behaviour', () => {
   test.beforeEach(async ({ page }, testInfo) => {
-    await page.goto(testInfo.config.use.baseURL, { waitUntil: 'domcontentloaded' });
+    const baseURL = resolveBaseURL(testInfo);
+    await page.goto(baseURL, { waitUntil: 'domcontentloaded' });
     await page.waitForSelector('#messages');
   });
 

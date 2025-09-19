@@ -1,30 +1,29 @@
 const { test, expect } = require('@playwright/test');
+const { resolveBaseURL } = require('./helpers/navigation');
+const { runCommandInTerminal } = require('./helpers/terminal-actions');
 
 const APP_URL = process.env.TERMINAL_APP_URL;
 const GOTTY_URL = process.env.TERMINAL_GOTTY_URL;
 
-async function focusTerminal(page) {
-  const frameLocator = page.frameLocator('iframe');
-  const terminal = frameLocator.locator('x-screen');
-  await expect(terminal).toBeVisible();
-  await terminal.click();
-}
-
 test.describe('Terminal tab', () => {
   test.beforeEach(async ({ page }, testInfo) => {
-    const base = APP_URL || testInfo.config.use.baseURL;
+    const base = resolveBaseURL(testInfo, APP_URL);
     await page.goto(base, { waitUntil: 'domcontentloaded' });
     await page.getByRole('button', { name: 'Terminal' }).click();
     await page.waitForTimeout(1000);
   });
 
+  const focusGottyTerminal = async (page) => {
+    const terminal = page.locator('x-screen').first();
+    await expect(terminal).toBeVisible({ timeout: 15000 });
+    await terminal.click();
+  };
+
   test('terminal iframe is rendered and interactive', async ({ page }) => {
     const iframe = page.locator('#terminal-iframe');
     await expect(iframe).toBeVisible();
 
-    await focusTerminal(page);
-    await page.keyboard.type('echo "hello from playwright"');
-    await page.keyboard.press('Enter');
+    await runCommandInTerminal(page, 'echo "hello from playwright"');
 
     await page.waitForTimeout(500);
   });
@@ -42,7 +41,7 @@ test.describe('Terminal tab', () => {
     const filename = `playwright-terminal-${Date.now()}.txt`;
 
     await page.goto(GOTTY_URL, { waitUntil: 'domcontentloaded' });
-    await focusTerminal(page);
+    await focusGottyTerminal(page);
 
     await page.keyboard.type(`echo "terminal content" > ${filename}`);
     await page.keyboard.press('Enter');
@@ -50,7 +49,7 @@ test.describe('Terminal tab', () => {
     await page.keyboard.press('Enter');
     await page.waitForTimeout(1000);
 
-    const base = APP_URL || testInfo.config.use.baseURL;
+    const base = resolveBaseURL(testInfo, APP_URL);
     await page.goto(base, { waitUntil: 'domcontentloaded' });
     await page.getByRole('button', { name: 'Code' }).click();
     await page.waitForTimeout(1000);

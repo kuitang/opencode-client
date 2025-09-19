@@ -1,4 +1,5 @@
 const { test, expect } = require('@playwright/test');
+const { resolveBaseURL } = require('./helpers/navigation');
 
 async function setViewportAndDispatch(page, size) {
   await page.setViewportSize(size);
@@ -45,7 +46,8 @@ async function getChatState(page) {
 
 test.describe('Responsive resizing behaviour', () => {
   test.beforeEach(async ({ page }, testInfo) => {
-    await page.goto(testInfo.config.use.baseURL, { waitUntil: 'domcontentloaded' });
+    const baseURL = resolveBaseURL(testInfo);
+    await page.goto(baseURL, { waitUntil: 'domcontentloaded' });
     await page.waitForSelector('#chat-container');
     await ensureMessages(page);
   });

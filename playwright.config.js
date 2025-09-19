@@ -11,6 +11,9 @@ module.exports = defineConfig({
     baseURL: process.env.PLAYWRIGHT_BASE_URL || 'http://localhost:8080',
     headless: !!process.env.CI,
     trace: 'on-first-retry',
+    launchOptions: {
+      args: [`--explicitly-allowed-ports=${process.env.PLAYWRIGHT_ALLOWED_PORTS || '6666'}`],
+    },
   },
   projects: [
     {

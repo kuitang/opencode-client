@@ -1,8 +1,10 @@
 const { test, expect } = require('@playwright/test');
+const { resolveBaseURL } = require('./helpers/navigation');
 
 test.describe('File dropdown during SSE updates', () => {
   test.beforeEach(async ({ page }, testInfo) => {
-    await page.goto(testInfo.config.use.baseURL, { waitUntil: 'domcontentloaded' });
+    const baseURL = resolveBaseURL(testInfo);
+    await page.goto(baseURL, { waitUntil: 'domcontentloaded' });
     await page.getByRole('button', { name: 'Code' }).click();
     await page.waitForSelector('#file-selector');
   });

@@ -1,6 +1,7 @@
 const { test, expect } = require('@playwright/test');
 const { promisify } = require('util');
 const { exec } = require('child_process');
+const { resolveBaseURL } = require('./helpers/navigation');
 
 const execAsync = promisify(exec);
 const CONTAINER = process.env.PLAYWRIGHT_SANDBOX_CONTAINER;
@@ -22,7 +23,8 @@ test.describe('SSE out-of-band updates', () => {
   test.skip(!CONTAINER, 'Set PLAYWRIGHT_SANDBOX_CONTAINER to run SSE OOB tests');
 
   test.beforeEach(async ({ page }, testInfo) => {
-    await page.goto(testInfo.config.use.baseURL, { waitUntil: 'domcontentloaded' });
+    const baseURL = resolveBaseURL(testInfo);
+    await page.goto(baseURL, { waitUntil: 'domcontentloaded' });
     await page.getByRole('button', { name: 'Code' }).click();
     await page.waitForSelector('#file-count-container');
   });
