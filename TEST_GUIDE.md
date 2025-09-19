@@ -1,170 +1,84 @@
-# Test Guide for OpenCode Client
+# UI Test Guide for OpenCode Client
 
-## Overview
-This repository contains multiple JavaScript test files. They fall into two categories:
+The JavaScript-based UI test suite is now fully managed by Playwright. Every browser automation script lives under `test/ui` and is executed through the Playwright runner.
 
-### 1. Playwright Node.js Tests (Require Installation)
-These tests launch a real browser and interact with the application.
+## Prerequisites
 
-### 2. Browser-Executable Tests
-These can be run directly in the browser console via `page.evaluate()`.
-
-## Test Files and Their Purpose
-
-| File | Type | Purpose | How to Run |
-|------|------|---------|------------|
-| `playwright-session-helper.js` | Helper | Session management utilities | Imported by other tests |
-| `playwright_terminal_test.js` | Playwright | Tests terminal/gotty integration | `node playwright_terminal_test.js` |
-| `test_preview_integration.js` | Playwright | Full preview feature integration test | `node test_preview_integration.js` |
-| `test_preview_playwright.js` | Browser/Module | Preview tab, Kill button tests | Via browser or import |
-| `test_dropdown_sse_edge_case.js` | Playwright | SSE dropdown edge cases | `node test_dropdown_sse_edge_case.js` |
-| `test_flush_alignment.js` | Browser | Connection flash alignment | Via browser console |
-| `test_resize_scenarios.js` | Browser | UI resize/scroll tests | Via browser console |
-| `test_sse.js` | Browser | SSE message streaming | Via browser console |
-| `test_sse_oob_updates.js` | Browser | Out-of-band HTMX updates | Via browser console |
-| `test_sse_scroll_playwright.js` | Playwright | SSE with scroll behavior | `node test_sse_scroll_playwright.js` |
-| `run_preview_tests.js` | Playwright | Runs preview feature tests | `node run_preview_tests.js` |
-
-## Installation Requirements
-
-### For Playwright Tests
-```bash
-# First time setup
-npm init -y
-npm install playwright
-
-# Install browsers (one time)
-npx playwright install chromium
-```
-
-### For Browser Console Tests
-No installation needed - run directly in browser DevTools.
-
-## Running the Tests
-
-### Method 1: Run Playwright Tests (After Installation)
-```bash
-# Make sure server is running
-./opencode-chat -port 8085 &
-
-# Run individual test
-node test_preview_integration.js
-
-# Or run all Playwright tests
-for test in playwright_terminal_test.js test_preview_integration.js test_dropdown_sse_edge_case.js test_sse_scroll_playwright.js run_preview_tests.js; do
-    echo "Running $test..."
-    node $test
-done
-```
-
-### Method 2: Run Browser Console Tests (No Installation)
-1. Open browser and navigate to `http://localhost:8085`
-2. Open DevTools Console (F12)
-3. Copy and paste the test file contents
-4. Call the test functions:
-```javascript
-// Example for test_sse.js
-testSSEConnection();
-testMessageStreaming();
-
-// Example for test_resize_scenarios.js
-testScrollPositionPreservation();
-testRapidResizeTransitions();
-```
-
-### Method 3: Run via Playwright's page.evaluate() (Hybrid)
-```javascript
-// In a Playwright script
-const testCode = fs.readFileSync('test_preview_playwright.js', 'utf8');
-await page.evaluate(testCode);
-await page.evaluate(() => testFirstLoadShowsPreview());
-```
-
-## Quick Test Without Playwright
-
-If you don't want to install Playwright, you can test core functionality with curl:
+1. Ensure the Go server is running locally (defaults to `http://localhost:8080`).
+2. Install Node.js 18+.
+3. Install the test dependencies and browser binaries:
 
 ```bash
-# Test 1: First load shows preview content
-curl -s http://localhost:8085/ | grep -c "No Application Running"
-
-# Test 2: Preview tab endpoint
-curl -s http://localhost:8085/tab/preview | grep -c "preview-iframe\|No Application Running"
-
-# Test 3: Kill endpoint exists
-curl -X POST http://localhost:8085/kill-preview-port -d "port=9999" -v 2>&1 | grep "< HTTP"
-
-# Test 4: Test with a real server
-python3 -m http.server 5555 &
-sleep 2
-curl -s http://localhost:8085/tab/preview | grep -c "Port"
-kill %1  # Kill the Python server
+npm install
+npx playwright install
 ```
 
-## Manual Browser Testing
+> The repository includes `package-lock.json`; re-running `npm install` keeps versions consistent.
 
-1. **Test First Load**:
-   - Open `http://localhost:8085`
-   - Should see "No Application Running" in preview area
+## Running The Suite
 
-2. **Test Kill Button**:
-   - Start a server: Ask the assistant to create a Python HTTP server
-   - Go to Preview tab
-   - Click Kill button
-   - Should return to "No Application Running"
+```bash
+# Headless run
+npm run test:ui
 
-3. **Test SSE Streaming**:
-   - Send a message in chat
-   - Watch for smooth streaming of response
+# Headed/debug mode
+npm run test:ui:headed
 
-4. **Test Resize Behavior**:
-   - Resize browser window
-   - Check that scroll position is preserved
-   - Toggle mobile/desktop view
-
-## Common Issues
-
-### "Cannot find module 'playwright'"
-- Solution: Run `npm install playwright` first
-
-### "Server is not running on port 8085"
-- Solution: Start server with `./opencode-chat -port 8085`
-
-### "Connection refused" errors
-- Solution: Check Docker is running for sandbox
-- Solution: Restart the server
-
-### Tests timeout
-- Solution: Increase timeout values in test files
-- Solution: Check server logs in `/tmp/opencode.log`
-
-## Test Development
-
-To add new tests:
-
-1. **For Playwright tests**: Follow pattern in `test_preview_integration.js`
-2. **For browser tests**: Follow pattern in `test_preview_playwright.js`
-3. **Naming convention**: `test_<feature>_<type>.js`
-4. **Always include**: Error handling, screenshots on failure, clear console output
-
-## CI/CD Integration
-
-For GitHub Actions or other CI:
-
-```yaml
-- name: Install dependencies
-  run: |
-    npm install playwright
-    npx playwright install chromium
-
-- name: Start server
-  run: ./opencode-chat -port 8085 &
-
-- name: Wait for server
-  run: sleep 10
-
-- name: Run tests
-  run: |
-    node test_preview_integration.js
-    node test_dropdown_sse_edge_case.js
+# Filter specific specs
+npx playwright test test/ui/preview.spec.js
 ```
+
+The Playwright config (`playwright.config.js`) pins the test directory to `test/ui`, uses Chromium by default, and limits execution to a single worker to avoid cross-test interference with the shared sandbox.
+
+## Test Suite Reference
+
+| Spec | Coverage Highlights | Opt-in Variables |
+|------|---------------------|------------------|
+| `test/ui/preview.spec.js` | First-load preview content, tab switching, Kill button on a disposable Python server | `PREVIEW_TEST_SERVER_PORT` (defaults to `5555`) |
+| `test/ui/layout-flush.spec.js` | Header/tab bar alignment across breakpoints | — |
+| `test/ui/resize.spec.js` | Responsive behaviour, scroll preservation, resize race guards | — |
+| `test/ui/dropdown-sse.spec.js` | File dropdown focus/selection during synthetic SSE updates | — |
+| `test/ui/sse-scroll.spec.js` | Auto-scroll stickiness for the message list | — |
+| `test/ui/terminal.spec.js` | Terminal iframe rendering, optional GoTTY and Code sync checks | `TERMINAL_APP_URL`, `TERMINAL_GOTTY_URL` |
+| `test/ui/sse-oob.spec.js` | File stats + dropdown refresh when sandbox files change | `PLAYWRIGHT_SANDBOX_CONTAINER` (Docker container name) |
+| `test/ui/sse-stream.spec.js` | Smoke test for the SSE event feed | `PLAYWRIGHT_SSE_PORT`, `PLAYWRIGHT_SSE_PATH` |
+
+## Optional Environment Variables
+
+Use these to enable advanced scenarios or non-default ports:
+
+- `PLAYWRIGHT_BASE_URL` — overrides the default `http://localhost:8080` base URL.
+- `PREVIEW_TEST_SERVER_PORT` — port used by the preview spec when launching its temporary Python server.
+- `TERMINAL_APP_URL` — alternate app URL for terminal tests when the UI runs on a custom port.
+- `TERMINAL_GOTTY_URL` — direct GoTTY endpoint (e.g., `http://localhost:41467`).
+- `PLAYWRIGHT_SANDBOX_CONTAINER` — Docker container where files should be created/removed during SSE OOB checks.
+- `PLAYWRIGHT_SSE_PORT` / `PLAYWRIGHT_SSE_PATH` — SSE endpoint coordinates for the stream spec.
+- `PLAYWRIGHT_WORKERS` — override worker count (default `1`).
+
+Example run enabling the optional suites:
+
+```bash
+PLAYWRIGHT_BASE_URL=http://localhost:8090 \
+TERMINAL_GOTTY_URL=http://localhost:41467 \
+PLAYWRIGHT_SANDBOX_CONTAINER=opencode-sandbox \
+PLAYWRIGHT_SSE_PORT=6001 \
+npm run test:ui
+```
+
+## Adding New UI Tests
+
+1. Create a new `.spec.js` file under `test/ui`.
+2. Import Playwright helpers: `const { test, expect } = require('@playwright/test');`.
+3. Prefer `test.describe` blocks with focused fixtures/`beforeEach` to keep setup scoped.
+4. Share common utilities by exporting helpers from `test/ui/helpers/*`.
+5. Use Playwright assertions (`expect`) instead of manual logging so CI failures are explicit.
+6. Guard environment-specific behaviour with `test.skip`/`test.fail` based on feature flags.
+
+## Troubleshooting
+
+- **Server not running**: The suite assumes the Go server is already started. Launch it via `go run .` or `./opencode-chat -port 8080` before executing tests.
+- **Playwright binaries missing**: Re-run `npx playwright install` if browsers were removed or if the OS changed.
+- **Docker unavailable**: Specs that rely on sandbox file manipulation (`sse-oob.spec.js`) will skip themselves unless `PLAYWRIGHT_SANDBOX_CONTAINER` is set.
+- **Session-dependent flows**: Inject the helper from `test/ui/helpers/session-helper.js` using `await injectSessionHelper(page)` in the relevant spec.
+
+With everything consolidated under Playwright, there is no longer a need to paste scripts into the browser console—the suite can be run headlessly or interactively in one command.

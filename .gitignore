@@ -35,6 +35,8 @@ build/
 Thumbs.db
 
 *.json
+!package.json
+!package-lock.json
 *.txt
 .gocache/*
 .playwright-mcp/*
@@ -42,5 +44,9 @@ Thumbs.db
 .server.pid
 coverage.out
 
+# Node project artifacts
+node_modules/
+
 # Ignore local trace-auth tool
 cmd/trace-auth/
+.gitignore

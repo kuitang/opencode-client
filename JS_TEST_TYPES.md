@@ -1,133 +1,73 @@
-# JavaScript Test File Types
+# Frontend Playwright Test Guide
 
-## Files Requiring Node.js + Playwright (4 files)
+All browser-facing automation now lives in the Playwright test runner. Every test file sits under `test/ui` and runs through `@playwright/test`.
 
-These MUST be run with Node.js after installing Playwright:
+## Project Layout
 
-1. **`test_preview_integration.js`**
-   - Full integration test with browser automation
-   - Requires: `const { chromium } = require('playwright');`
-   - Run: `node test_preview_integration.js`
+- `playwright.config.js` — shared configuration (Chromium desktop, serial workers by default).
+- `test/ui/*.spec.js` — individual suites (preview, layout, responsive behaviour, SSE, terminal, etc.).
+- `test/ui/helpers/session-helper.js` — optional helper that can be injected when a scenario needs to persist chat sessions across reloads.
 
-2. **`run_preview_tests.js`**
-   - Comprehensive preview feature tests
-   - Requires: `const { chromium } = require('playwright');`
-   - Run: `node run_preview_tests.js`
+## Installing Dependencies
 
-3. **`test_dropdown_sse_edge_case.js`**
-   - Has a `runAllTests()` function at bottom that requires Playwright
-   - Mixed: Browser functions + Node.js runner
-   - Run: `node test_dropdown_sse_edge_case.js` (for full test)
-   - OR: Copy individual functions to browser console
-
-4. **`test_sse_oob_updates.js`**
-   - Contains Node.js requires (`child_process`, `util`) inside functions
-   - Mixed: Some functions need Node.js, others are browser-compatible
-   - Run: `node test_sse_oob_updates.js` (if it has a runner)
-   - OR: Copy browser-compatible functions to console
-
-## Browser-Only Test Files (7 files)
-
-These can be run directly in the browser console OR via Playwright's `page.evaluate()`:
-
-1. **`playwright-session-helper.js`**
-   - Session helper utilities
-   - Usage: Import/paste into browser console
-
-2. **`playwright_terminal_test.js`**
-   - Terminal/Gotty tests
-   - Usage: Paste in console, call functions
-
-3. **`test_preview_playwright.js`**
-   - Preview tab and Kill button tests
-   - Usage: Paste in console, call `testFirstLoadShowsPreview()`, etc.
-   - Has `module.exports` for optional Node.js import
-
-4. **`test_flush_alignment.js`**
-   - Connection flash UI tests
-   - Usage: Paste in console, call test functions
-
-5. **`test_resize_scenarios.js`**
-   - UI resize and scroll preservation tests
-   - Usage: Paste in console, call `testScrollPositionPreservation()`, etc.
-
-6. **`test_sse.js`**
-   - SSE connection and streaming tests
-   - Usage: Paste in console, call `testSSEConnection()`, etc.
-
-7. **`test_sse_scroll_playwright.js`**
-   - SSE with scroll behavior tests
-   - Usage: Paste in console, call test functions
-
-## How to Run Each Type
-
-### For Node.js/Playwright Tests:
 ```bash
-# One-time setup
-npm init -y
-npm install playwright
-npx playwright install chromium
-
-# Run tests
-node test_preview_integration.js
-node run_preview_tests.js
-node test_dropdown_sse_edge_case.js
+npm install
+npx playwright install
 ```
 
-### For Browser-Only Tests:
-```javascript
-// Method 1: Direct in browser console
-// 1. Open http://localhost:8085 in browser
-// 2. Open DevTools Console (F12)
-// 3. Copy entire test file contents
-// 4. Paste into console
-// 5. Call functions:
+> The repository ships with a `package-lock.json`; re-running `npm install` keeps dependencies pinned. `npx playwright install` downloads the browsers required for headless runs.
 
-testFirstLoadShowsPreview();  // From test_preview_playwright.js
-testScrollPositionPreservation();  // From test_resize_scenarios.js
-testSSEConnection();  // From test_sse.js
+## Running The UI Suites
 
-// Method 2: Via Playwright (if installed)
-const { chromium } = require('playwright');
-const fs = require('fs');
-
-(async () => {
-    const browser = await chromium.launch();
-    const page = await browser.newPage();
-    await page.goto('http://localhost:8085');
-
-    // Load and execute browser test
-    const testCode = fs.readFileSync('test_preview_playwright.js', 'utf8');
-    await page.evaluate(testCode);
-
-    // Run specific test
-    const result = await page.evaluate(() => testFirstLoadShowsPreview());
-    console.log('Test result:', result);
-
-    await browser.close();
-})();
+```bash
+npm run test:ui
+# or
+npx playwright test
 ```
 
-## Quick Reference
+Use headed mode when debugging:
 
-| File | Type | Requires Installation | How to Run |
-|------|------|----------------------|------------|
-| `test_preview_integration.js` | Node.js | Yes (Playwright) | `node <file>` |
-| `run_preview_tests.js` | Node.js | Yes (Playwright) | `node <file>` |
-| `test_dropdown_sse_edge_case.js` | Mixed | Yes for full test | `node <file>` or browser |
-| `test_sse_oob_updates.js` | Mixed | Yes for some functions | `node <file>` or browser |
-| All other test files | Browser | No | Browser console |
+```bash
+npm run test:ui:headed
+```
 
-## Testing Without Any Installation
+## Suite Overview
 
-If you don't want to install anything:
-1. Use the provided `run_tests_no_playwright.sh` script for basic testing
-2. Copy browser-only test files into DevTools console
-3. Run individual test functions manually
+| File | Purpose | Notes |
+|------|---------|-------|
+| `test/ui/preview.spec.js` | End-to-end preview tab checks (first load, tab switching, kill button) | Starts an optional local Python server on port `5555` to exercise the Kill button. Override with `PREVIEW_TEST_SERVER_PORT`. |
+| `test/ui/layout-flush.spec.js` | Visual alignment of header/tab bar across breakpoints | Pure DOM assertions, no external deps. |
+| `test/ui/resize.spec.js` | Responsive viewport transitions, scroll preservation, resize race conditions | Injects sample messages before resizing. |
+| `test/ui/dropdown-sse.spec.js` | File dropdown focus/selection stability when SSE updates arrive | Simulates SSE events with custom DOM updates. |
+| `test/ui/sse-scroll.spec.js` | Message list auto-scroll behaviour (bottom stickiness, near-bottom threshold, rapid bursts) | Runs entirely in-browser using synthetic SSE events. |
+| `test/ui/terminal.spec.js` | Terminal iframe presence and optional GoTTY/Code tab integration | Requires `TERMINAL_APP_URL` / `TERMINAL_GOTTY_URL` for advanced checks; otherwise only the iframe test runs. |
+| `test/ui/sse-oob.spec.js` | Code tab out-of-band SSE updates triggered by sandbox file changes | Requires Docker and `PLAYWRIGHT_SANDBOX_CONTAINER` pointing at the running sandbox container. |
+| `test/ui/sse-stream.spec.js` | Low-level SSE stream validation | Skipped unless `PLAYWRIGHT_SSE_PORT` (and optionally `PLAYWRIGHT_SSE_PATH`) are defined. |
 
-## Which Approach to Use?
+## Optional Environment Variables
 
-- **For CI/CD**: Use Node.js/Playwright tests (automated, headless)
-- **For quick debugging**: Use browser console tests (immediate, visual)
-- **For comprehensive testing**: Run both types
-- **For no installation**: Use browser console or shell script
+Some suites are guarded behind environment variables so CI and local runs can opt-in gradually:
+
+- `PREVIEW_TEST_SERVER_PORT` — override the port used for the temporary Python server in preview tests (default `5555`).
+- `TERMINAL_APP_URL` — base URL for the UI when terminal tests need a different port than the global `baseURL`.
+- `TERMINAL_GOTTY_URL` — direct GoTTY endpoint for terminal interaction tests.
+- `PLAYWRIGHT_SANDBOX_CONTAINER` — Docker container name used by the SSE OOB suite for creating/removing files.
+- `PLAYWRIGHT_SSE_PORT` — port of the SSE event stream; enables the SSE stream spec.
+- `PLAYWRIGHT_SSE_PATH` — optional path override for the SSE endpoint (defaults to `/event`).
+- `PLAYWRIGHT_WORKERS` — override the single-worker default if you have isolated sandboxes per test run.
+
+Set these variables inline when executing the suite, e.g.:
+
+```bash
+PLAYWRIGHT_SANDBOX_CONTAINER=opencode-sandbox \
+TERMINAL_GOTTY_URL=http://localhost:41467 \
+PLAYWRIGHT_SSE_PORT=6001 \
+npx playwright test
+```
+
+## Tips
+
+- Playwright tests assume the Go server is already running at `PLAYWRIGHT_BASE_URL` (defaults to `http://localhost:8080`).
+- Keep long-running fixtures (e.g. Python servers) within `test.step`/`try...finally` blocks to guarantee teardown.
+- When adding new browser helpers, export them from `test/ui/helpers/*` so they can be shared across specs.
+- Prefer Playwright assertions (`expect`) over manual logging so failures surface clearly in CI.
