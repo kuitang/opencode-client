@@ -135,7 +135,7 @@ This target builds the server, runs it on port `6666`, executes the Playwright s
 
 ## Dependencies
 
-- Go 1.19+
+- Go 1.23+
 - Docker (for real sandbox tests)
 - OpenCode sandbox image (built by the repo’s Dockerfile in `sandbox/`)
 - github.com/PuerkitoBio/goquery (for HTML parsing in tests)
