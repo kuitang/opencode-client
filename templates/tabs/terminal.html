@@ -39,7 +39,7 @@
 
 {{/* Main template defined AFTER components (top-level) */}}
 {{define "tab-terminal"}}
-<div class="max-w-6xl mx-auto">
+<div>
     {{template "mac-chrome" (dict
         "Title" "Terminal"
         "RightContent" (renderComponent "terminal-status" .)

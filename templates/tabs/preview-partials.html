@@ -1,0 +1,23 @@
+{{define "session-cleared"}}
+<!-- Session cleared -->
+{{end}}
+
+{{define "preview-no-app"}}
+<div style="display: flex; align-items: center; justify-content: center; height: 100vh; font-family: system-ui, -apple-system, sans-serif;">
+    <div style="text-align: center;">
+        <h2 style="color: #666;">No Application Running</h2>
+        <p style="color: #999;">Start a web server on any port to see it here.</p>
+        <p style="color: #999; font-size: 0.9em;">Example: python -m http.server 5000</p>
+    </div>
+</div>
+{{end}}
+
+{{define "preview-connection-error"}}
+<div style="display: flex; align-items: center; justify-content: center; height: 100vh; font-family: system-ui, -apple-system, sans-serif;">
+    <div style="text-align: center;">
+        <h2 style="color: #d00;">Connection Error</h2>
+        <p style="color: #666;">Unable to connect to application on port {{.Port}}</p>
+        <p style="color: #999; font-size: 0.9em;">The application may still be starting up. Try refreshing in a moment.</p>
+    </div>
+</div>
+{{end}}

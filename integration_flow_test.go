@@ -294,19 +294,7 @@ func TestGetMessages(t *testing.T) {
 }
 
 func TestProviderModelSelection(t *testing.T) {
-	server, err := NewServer()
-	if err != nil {
-		t.Fatalf("Failed to create server: %v", err)
-	}
-
-	// Start opencode for this test
-	if err := server.startOpencodeServer(); err != nil {
-		t.Fatalf("Failed to start opencode: %v", err)
-	}
-	defer server.stopOpencodeServer()
-	if err := WaitForOpencodeReadyURL(server.sandbox.OpencodeURL(), 10*time.Second); err != nil {
-		t.Fatalf("Opencode server not ready: %v", err)
-	}
+	server := flowServer(t)
 
 	server.providers = []Provider{
 		{

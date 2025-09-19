@@ -1,0 +1,65 @@
+{{define "logout"}}<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Logged Out - VibeCoding</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <link rel="stylesheet" href="/static/styles.css">
+    <meta http-equiv="refresh" content="5;url=/login">
+</head>
+<body class="h-screen bg-gradient-to-br from-blue-600 to-blue-800 flex items-center justify-center">
+    <div class="max-w-md w-full mx-4">
+        <div class="bg-white rounded-lg shadow-2xl p-8 text-center">
+            <!-- Logo/Icon -->
+            <div class="mb-6">
+                <div class="w-20 h-20 bg-blue-600 rounded-full mx-auto flex items-center justify-center">
+                    <svg class="w-10 h-10 text-white" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M17 16l4-4m0 0l-4-4m4 4H7m6 4v1a3 3 0 01-3 3H6a3 3 0 01-3-3V7a3 3 0 013-3h4a3 3 0 013 3v1"/>
+                    </svg>
+                </div>
+            </div>
+
+            <!-- Main Message -->
+            <h1 class="text-2xl font-bold text-gray-800 mb-3">You've logged out successfully</h1>
+
+            <!-- Vibe Message -->
+            <p class="text-gray-600 mb-6">
+                Thanks for vibing with us! We hope you enjoyed your coding session and look forward to seeing you again soon.
+            </p>
+
+            <!-- Stats or Fun Message -->
+            <div class="bg-blue-50 rounded-lg p-4 mb-6">
+                <p class="text-blue-800 text-sm">
+                    <span class="font-semibold">✨ Keep the vibe going!</span><br>
+                    Your projects are safe and sound, ready for your next creative session.
+                </p>
+            </div>
+
+            <!-- Action Buttons -->
+            <div class="space-y-3">
+                <a href="/login" class="block w-full px-4 py-3 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition-colors font-medium">
+                    Login Again
+                </a>
+                <p class="text-xs text-gray-500">
+                    You'll be redirected to login in 5 seconds...
+                </p>
+            </div>
+
+            <!-- Footer Message -->
+            <div class="mt-8 pt-6 border-t border-gray-200">
+                <p class="text-xs text-gray-400">
+                    VibeCoding - Where AI meets creativity
+                </p>
+            </div>
+        </div>
+
+        <!-- Decorative Elements -->
+        <div class="mt-8 flex justify-center gap-2">
+            <div class="w-2 h-2 bg-white rounded-full opacity-40 animate-pulse"></div>
+            <div class="w-2 h-2 bg-white rounded-full opacity-60 animate-pulse" style="animation-delay: 0.2s"></div>
+            <div class="w-2 h-2 bg-white rounded-full opacity-80 animate-pulse" style="animation-delay: 0.4s"></div>
+        </div>
+    </div>
+</body>
+</html>{{end}}
