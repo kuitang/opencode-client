@@ -1,0 +1,66 @@
+name: CI
+
+on:
+  push:
+    branches:
+      - master
+  pull_request:
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    env:
+      CI: '1'
+      OPENCODE_API_KEY: ${{ secrets.OPENCODE_API_KEY || 'dummy-ci-key' }}
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up Go
+        uses: actions/setup-go@v5
+        with:
+          go-version: '1.23'
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '18'
+
+      - name: Prepare OpenCode auth config
+        run: |
+          mkdir -p ~/.local/share/opencode
+          : "${OPENCODE_API_KEY:=dummy-ci-key}"
+          cat <<JSON > ~/.local/share/opencode/auth.json
+          {
+            "opencode": {
+              "type": "api",
+              "key": "${OPENCODE_API_KEY}"
+            }
+          }
+          JSON
+
+      - name: Install Go dependencies
+        run: go mod download
+
+      - name: Install Node dependencies
+        run: npm ci
+
+      - name: Install Playwright browsers
+        run: npx playwright install --with-deps chromium
+
+      - name: Run Go unit tests
+        run: make test-unit
+
+      - name: Run Go integration tests
+        run: make test-integration
+
+      - name: Run Playwright UI tests
+        run: make test-ui
+
+      - name: Upload server logs on failure
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: server-logs
+          path: /tmp/opencode-chat-ui.log

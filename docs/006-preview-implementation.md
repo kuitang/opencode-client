@@ -100,7 +100,7 @@ RUN apt-get install -y procps net-tools psmisc iproute2 socat
 ## Testing Patterns
 
 **Integration Tests**
-- Use shared test server from `integration_common_test.go`
+- Use shared test server utilities in `integration_test.go`
 - Test port detection with mock sandbox responses
 - Verify proxy routing and error handling
 

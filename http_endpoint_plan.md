@@ -163,12 +163,12 @@ Transform `handleMessages()` to mirror SSE processing:
 ### Test Coverage Strategy
 
 #### Existing Test Coverage
-- **Rendering Functions**: Well-tested in `unit_formatting_test.go`
+- **Rendering Functions**: Well-tested in `unit_test.go`
   - `renderText()`: Markdown detection, XSS prevention, autolink
   - Plain text vs markdown differentiation
   - Security sanitization
-- **Todo Rendering**: Tested in `unit_todo_renderer_test.go`
-- **SSE Part Management**: Tested in `unit_sse_duplication_test.go`
+- **Todo Rendering**: Tested in `unit_test.go`
+- **SSE Part Management**: Tested in `unit_test.go`
 - **Basic HTTP Endpoint**: Integration test in `integration_main_test.go`
 
 #### Required New Tests

@@ -70,7 +70,7 @@
 
 {{/* Main template defined AFTER components (top-level) */}}
 {{define "tab-preview"}}
-<div class="max-w-4xl mx-auto">
+<div>
     {{template "mac-chrome" (dict
         "Title" "Live Preview"
         "RightContent" (renderComponent "preview-buttons" .)

@@ -23,7 +23,7 @@
 
 {{define "code-buttons"}}
 <button id="copy-btn"
-        class="px-4 py-2 text-sm font-medium text-gray-600 bg-white border border-gray-300 rounded-md hover:bg-gray-50 focus:outline-none focus:ring-2 focus:ring-blue-500 min-h-[44px]"
+        class="px-4 py-2 text-sm font-medium text-gray-600 bg-white border border-gray-300 rounded-md hover:bg-gray-50 focus:outline-none focus:ring-2 focus:ring-blue-500 min-h-[44px] inline-flex items-center"
         onclick="
             const pre = document.querySelector('#code-content pre');
             if (pre) {
@@ -76,7 +76,7 @@
 
 {{/* Main template defined AFTER components (top-level) */}}
 {{define "tab-code"}}
-<div class="max-w-4xl mx-auto">
+<div>
     {{template "mac-chrome" (dict
         "Title" "Code Editor"
         "LeftContent" (renderComponent "code-left-content" .)

@@ -1,0 +1,139 @@
+{{define "projects"}}<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Projects - VibeCoding</title>
+    <script src="https://unpkg.com/htmx.org@2.0.3"></script>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <link rel="stylesheet" href="/static/styles.css">
+</head>
+<body class="min-h-screen bg-gray-50">
+    <!-- Header -->
+    <header class="bg-white border-b border-gray-200">
+        <div class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
+            <div class="flex justify-between items-center h-16">
+                <h1 class="text-xl font-semibold text-gray-800">VibeCoding</h1>
+
+                <!-- User Menu -->
+                <div class="relative" x-data="{ open: false }">
+                    <button onclick="this.nextElementSibling.classList.toggle('hidden')"
+                            class="flex items-center gap-2 px-3 py-2 rounded-lg hover:bg-gray-100 transition-colors">
+                        <div class="w-8 h-8 bg-blue-600 rounded-full flex items-center justify-center text-white font-medium">
+                            {{.UserInitial}}
+                        </div>
+                        <span class="text-sm text-gray-700">{{.UserEmail}}</span>
+                        <svg class="w-4 h-4 text-gray-500" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 9l-7 7-7-7"/>
+                        </svg>
+                    </button>
+
+                    <div class="hidden absolute right-0 mt-2 w-48 bg-white rounded-lg shadow-lg border border-gray-200 z-50">
+                        <a href="/projects" class="block px-4 py-2 text-sm text-gray-700 hover:bg-gray-100">Projects</a>
+                        <a href="/settings" class="block px-4 py-2 text-sm text-gray-700 hover:bg-gray-100">Settings</a>
+                        <hr class="border-gray-200">
+                        <form action="/logout" method="POST">
+                            <button type="submit" class="w-full text-left block px-4 py-2 text-sm text-gray-700 hover:bg-gray-100">Logout</button>
+                        </form>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </header>
+
+    <!-- Main Content -->
+    <main class="max-w-6xl mx-auto px-4 sm:px-6 lg:px-8 py-8">
+        <!-- Search and Actions -->
+        <div class="flex flex-col sm:flex-row gap-4 mb-8">
+            <div class="flex-1">
+                <div class="relative">
+                    <svg class="absolute left-3 top-1/2 transform -translate-y-1/2 w-5 h-5 text-gray-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z"/>
+                    </svg>
+                    <input type="text" placeholder="Search projects..."
+                           class="w-full pl-10 pr-4 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500">
+                </div>
+            </div>
+
+            <button class="px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition-colors font-medium flex items-center gap-2">
+                <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 4v16m8-8H4"/>
+                </svg>
+                New Project
+            </button>
+        </div>
+
+        <!-- Project Grid -->
+        <div class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-6">
+            {{range .Projects}}
+            {{template "project-card" .}}
+            {{end}}
+        </div>
+
+        {{if not .Projects}}
+        <!-- Empty State -->
+        <div class="text-center py-12">
+            <svg class="mx-auto h-12 w-12 text-gray-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M20 13V6a2 2 0 00-2-2H6a2 2 0 00-2 2v7m16 0v5a2 2 0 01-2 2H6a2 2 0 01-2-2v-5m16 0h-2.586a1 1 0 00-.707.293l-2.414 2.414a1 1 0 01-.707.293h-3.172a1 1 0 01-.707-.293l-2.414-2.414A1 1 0 006.586 13H4"/>
+            </svg>
+            <h3 class="mt-2 text-sm font-medium text-gray-900">No projects</h3>
+            <p class="mt-1 text-sm text-gray-500">Get started by creating a new project.</p>
+            <div class="mt-6">
+                <button class="px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition-colors font-medium">
+                    New Project
+                </button>
+            </div>
+        </div>
+        {{end}}
+    </main>
+</body>
+</html>{{end}}
+
+{{define "project-card"}}
+<a href="/?project={{.ID}}" class="block bg-white rounded-lg shadow hover:shadow-lg transition-shadow border border-gray-200">
+    <div class="p-6">
+        <!-- Project Type Badge -->
+        <div class="flex items-center justify-between mb-3">
+            <span class="inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium
+                         {{if eq .Type "Web"}}bg-blue-100 text-blue-800{{end}}
+                         {{if eq .Type "API"}}bg-green-100 text-green-800{{end}}
+                         {{if eq .Type "MCP"}}bg-purple-100 text-purple-800{{end}}
+                         {{if eq .Type "Data Science"}}bg-yellow-100 text-yellow-800{{end}}">
+                {{.Type}}
+            </span>
+
+            <!-- Language Icon -->
+            <div class="flex items-center gap-1">
+                {{if .Language}}
+                <span class="text-xs text-gray-500">{{.Language}}</span>
+                {{end}}
+            </div>
+        </div>
+
+        <!-- Project Name -->
+        <h3 class="text-lg font-semibold text-gray-900 mb-2">{{.Name}}</h3>
+
+        <!-- Stats -->
+        <div class="flex items-center gap-4 text-sm text-gray-600 mb-3">
+            <div class="flex items-center gap-1">
+                <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z"/>
+                </svg>
+                <span>{{.FileCount}} files</span>
+            </div>
+            <div class="flex items-center gap-1">
+                <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 6h16M4 12h16M4 18h7"/>
+                </svg>
+                <span>{{.LineCount}} lines</span>
+            </div>
+        </div>
+
+        <!-- Dates -->
+        <div class="text-xs text-gray-500">
+            <div>Created: {{.CreatedAt}}</div>
+            <div>Updated: {{.UpdatedAt}}</div>
+        </div>
+    </div>
+</a>
+{{end}}

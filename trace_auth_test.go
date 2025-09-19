@@ -10,7 +10,7 @@ import (
 	"testing"
 )
 
-func TestTraceAuth(t *testing.T) {
+func TestIntegrationTraceAuth(t *testing.T) {
 	fmt.Println("=== AUTH CONFIG TRACE ===")
 
 	// Step 1: Load auth config from home directory

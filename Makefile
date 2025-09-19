@@ -4,7 +4,7 @@ BIN ?= opencode-chat
 PKG ?= ./...
 
 .PHONY: build run test test-verbose test-race cover fmt vet lint check clean help \
-	 test-fast test-flow test-race-signal test-unit
+	 test-unit test-integration test-ui
 
 ## build: Compile the binary to ./$(BIN)
 build:
@@ -26,22 +26,21 @@ test-verbose:
 test-race:
 	go test -race $(PKG)
 
-## test-fast: Run mocked HTTP/SSE tests only (no Docker required)
-# These tests use httptest + StaticURLSandbox and should be fast/deterministic.
-test-fast:
-	go test -v -run '^(TestHTTPEndpointWithRichContent|TestHTTPEndpointWithTodoWrite|TestParityBetweenSSEAndHTTP|TestHTTPEndpointErrorHandling|TestSSEEndpoint|TestSSEFiltersBySession|TestSSEStreamsToolOutput)$$' .
-
 ## test-unit: Run consolidated unit tests only (no Docker)
 test-unit:
-	go test -v -run '^(TestSSE(MessagePartNoDuplication|MultiplePartTypes|HTMLGenerationNoDuplication|RapidUpdates)|TestUpdateRateLimiter.*|TestWaitForOpencodeReady.*|TestMessageParts.*|TestNewLoggingResponseWriter|TestLogging.*|TestRenderTodoList|TestFileDropdown.*|TestStreamingCSS|TestTemplate.*|TestTransform.*|TestMessage(Formatting|TemplateIDs|Metadata|PartDataSecurity|UserAndLLM|Multiline))$$' .
+	go test -v -run '^TestUnit' ./...
 
-## test-flow: Run regular flow tests (requires Docker + auth.json)
-test-flow:
-	go test -v -run '^(TestIndexPage|TestSendMessage|TestSSEStreaming|TestClearSession|TestGetMessages|TestProviderModelSelection|TestHTMXHeaders)$$' .
+## test-integration: Run consolidated integration tests (requires Docker + auth.json)
+test-integration:
+	go test -v -run '^TestIntegration' ./...
 
-## test-race-signal: Run race/signal tests (requires Docker; signal tests build+run app)
-test-race-signal:
-	go test -v -run '^(TestConcurrentSessionCreation|TestRaceConditionDoubleCheckedLocking|TestStopOpencodeServerGoroutineCleanup|TestSSEContextCancellation|TestSSEMultipleClientDisconnects|TestSignalHandling|TestOpencodeCleanupOnSignal|TestTraceAuth)$$' .
+## test-ui: Run Playwright UI tests (requires Node + Playwright browsers)
+test-ui: build
+	@bash -lc 'set -euo pipefail; \
+	  ./$(BIN) -port 6666 > /tmp/opencode-chat-ui.log 2>&1 & \
+	  pid=$$!; trap "kill $$pid" EXIT; \
+	  sleep 8; \
+	  CI=1 PLAYWRIGHT_ALLOWED_PORTS=6666 PLAYWRIGHT_BASE_URL=http://localhost:6666 npx playwright test'
 
 ## cover: Run tests with coverage summary
 cover:
@@ -73,9 +72,9 @@ help:
 	@echo "  test         Run all tests"
 	@echo "  test-verbose Run tests with -v"
 	@echo "  test-race    Run tests with race detector"
-	@echo "  test-fast    Run mocked HTTP/SSE tests only (no Docker)"
-	@echo "  test-flow    Run regular flow tests (Docker)"
-	@echo "  test-race-signal Run race/signal tests (Docker)"
+	@echo "  test-unit    Run consolidated unit tests (no Docker)"
+	@echo "  test-integration Run consolidated integration tests (Docker)"
+	@echo "  test-ui      Run Playwright UI tests"
 	@echo "  cover        Run coverage summary"
 	@echo "  fmt          Format code"
 	@echo "  vet          Static analysis"

@@ -1,0 +1,25 @@
+{
+  "name": "opencode-client",
+  "version": "1.0.0",
+  "description": "A web-based chat interface for OpenCode using Go and HTMX.",
+  "private": true,
+  "main": "index.js",
+  "scripts": {
+    "test:ui": "playwright test",
+    "test:ui:headed": "playwright test --headed"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/kuitang/opencode-client.git"
+  },
+  "keywords": [],
+  "author": "",
+  "license": "ISC",
+  "bugs": {
+    "url": "https://github.com/kuitang/opencode-client/issues"
+  },
+  "homepage": "https://github.com/kuitang/opencode-client#readme",
+  "devDependencies": {
+    "@playwright/test": "^1.55.0"
+  }
+}

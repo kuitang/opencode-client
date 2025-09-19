@@ -88,5 +88,5 @@ curl http://localhost:9091/session/ses_6cf2f3788ffexwPMyRi4q9g769/message
 - `pre-refresh-8091.png` - Screenshot before refresh
 - `pre-refresh-state-8091.json` - Detailed state before refresh  
 - `test_messages_verification.go` - Go program to test endpoint
-- `unit_http_parts_test.go` - Unit tests for part transformation
-- `integration_http_messages_test.go` - Integration tests for full rendering
+- `unit_test.go` - Unit tests for part transformation and rendering logic
+- `integration_test.go` - Integration tests for full rendering and sandbox flows

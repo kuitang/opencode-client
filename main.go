@@ -31,10 +31,11 @@ var templateFS embed.FS
 var staticFS embed.FS
 
 type Server struct {
-	sandbox           Sandbox           // Sandbox instance for secure code execution
-	sessions          map[string]string // cookie -> opencode session ID (for chat)
-	selectedFiles     map[string]string // cookie -> currently selected file path
-	workspaceSession  string            // Shared workspace session ID for file operations
+	sandbox           Sandbox                 // Sandbox instance for secure code execution
+	sessions          map[string]string       // cookie -> opencode session ID (for chat)
+	authSessions      map[string]*AuthSession // cookie -> auth session
+	selectedFiles     map[string]string       // cookie -> currently selected file path
+	workspaceSession  string                  // Shared workspace session ID for file operations
 	mu                sync.RWMutex
 	providers         []Provider
 	defaultModel      map[string]string
@@ -227,6 +228,22 @@ func (lw *LoggingResponseWriter) LogResponse(method, path string) {
 	log.Printf("WIRE_OUT %s %s [%d]: %s", method, path, lw.statusCode, bodyStr)
 }
 
+func loggingMiddleware(next http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		// Special handling for SSE endpoint - don't buffer the entire stream
+		if r.URL.Path == "/events" {
+			log.Printf("WIRE_OUT SSE connection started: %s %s", r.Method, r.URL.Path)
+			next.ServeHTTP(w, r)
+			log.Printf("WIRE_OUT SSE connection ended: %s %s", r.Method, r.URL.Path)
+			return
+		}
+
+		lw := NewLoggingResponseWriter(w)
+		next.ServeHTTP(lw, r)
+		lw.LogResponse(r.Method, r.URL.Path)
+	})
+}
+
 // NewServer creates a new Server instance with properly initialized templates
 func NewServer() (*Server, error) {
 	tmpl, err := loadTemplates()
@@ -236,10 +253,149 @@ func NewServer() (*Server, error) {
 
 	return &Server{
 		sessions:          make(map[string]string),
+		authSessions:      make(map[string]*AuthSession),
 		selectedFiles:     make(map[string]string),
 		templates:         tmpl,
 		codeUpdateLimiter: NewUpdateRateLimiter(200 * time.Millisecond),
 	}, nil
+}
+
+// renderHTML sets the HTML content type header and executes the template,
+// handling errors consistently across all handlers
+func (s *Server) renderHTML(w http.ResponseWriter, template string, data interface{}) {
+	w.Header().Set("Content-Type", "text/html")
+	if err := s.templates.ExecuteTemplate(w, template, data); err != nil {
+		http.Error(w, "Template error", http.StatusInternalServerError)
+		log.Printf("Template error rendering %s: %v", template, err)
+	}
+}
+
+// opencodeGet performs a GET request to the OpenCode API and decodes the JSON response
+func (s *Server) opencodeGet(path string, result interface{}) error {
+	resp, err := http.Get(fmt.Sprintf("%s%s", s.sandbox.OpencodeURL(), path))
+	if err != nil {
+		return err
+	}
+	defer resp.Body.Close()
+
+	if result != nil {
+		return json.NewDecoder(resp.Body).Decode(result)
+	}
+	return nil
+}
+
+// opencodePost performs a POST request to the OpenCode API with JSON payload
+func (s *Server) opencodePost(path string, payload interface{}) (*http.Response, error) {
+	jsonData, err := json.Marshal(payload)
+	if err != nil {
+		return nil, err
+	}
+	return http.Post(
+		fmt.Sprintf("%s%s", s.sandbox.OpencodeURL(), path),
+		"application/json",
+		bytes.NewReader(jsonData),
+	)
+}
+
+// executeShellCommand executes a shell command via OpenCode API and returns the output
+func (s *Server) executeShellCommand(sessionID, command string) (string, error) {
+	shellURL := fmt.Sprintf("/session/%s/shell", sessionID)
+	payload := map[string]string{"agent": "agent", "command": command}
+
+	resp, err := s.opencodePost(shellURL, payload)
+	if err != nil {
+		return "", err
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
+		return "", fmt.Errorf("command failed with status %d", resp.StatusCode)
+	}
+
+	var result MessageResponse
+	if err := json.NewDecoder(resp.Body).Decode(&result); err != nil {
+		return "", err
+	}
+
+	// Extract output from shell result
+	for _, part := range result.Parts {
+		if part.Type == "tool" && part.Tool == "bash" {
+			if output, ok := part.State["output"].(string); ok {
+				return output, nil
+			}
+		}
+	}
+	return "", nil
+}
+
+// getSessionCookie retrieves or creates a session cookie
+func (s *Server) getSessionCookie(w http.ResponseWriter, r *http.Request) (*http.Cookie, bool) {
+	cookie, err := r.Cookie("session")
+	if err != nil {
+		// Generate new cookie
+		cookie = &http.Cookie{
+			Name:     "session",
+			Value:    fmt.Sprintf("sess_%d", time.Now().UnixNano()),
+			HttpOnly: true,
+			Path:     "/",
+		}
+		http.SetCookie(w, cookie)
+		return cookie, true // true = newly created
+	}
+	return cookie, false
+}
+
+// httpError logs and sends an HTTP error response
+func (s *Server) httpError(w http.ResponseWriter, message string, code int) {
+	log.Printf("HTTP %d: %s", code, message)
+	http.Error(w, message, code)
+}
+
+// createProxyDirector creates a director function for reverse proxy
+func (s *Server) createProxyDirector(target *url.URL, pathPrefix string, originalReq *http.Request) func(*http.Request) {
+	return func(req *http.Request) {
+		req.URL.Scheme = target.Scheme
+		req.URL.Host = target.Host
+		req.Host = target.Host
+
+		// Strip prefix if provided
+		originalPath := originalReq.URL.Path
+		if pathPrefix != "" && strings.HasPrefix(originalPath, pathPrefix) {
+			req.URL.Path = strings.TrimPrefix(originalPath, pathPrefix)
+			if req.URL.Path == "" {
+				req.URL.Path = "/"
+			}
+		} else {
+			req.URL.Path = originalPath
+		}
+
+		// Preserve query parameters
+		req.URL.RawQuery = originalReq.URL.RawQuery
+
+		// Handle WebSocket and Origin headers
+		if originalReq.Header.Get("Upgrade") == "websocket" {
+			req.Header.Set("Origin", fmt.Sprintf("http://%s", target.Host))
+		} else if pathPrefix == "/terminal" {
+			// Special handling for gotty terminal
+			req.Header.Set("Origin", fmt.Sprintf("http://%s", target.Host))
+		}
+
+		// Forward important headers for WebSocket upgrade
+		if upgrade := originalReq.Header.Get("Upgrade"); upgrade != "" {
+			req.Header.Set("Upgrade", upgrade)
+		}
+		if connection := originalReq.Header.Get("Connection"); connection != "" {
+			req.Header.Set("Connection", connection)
+		}
+		// Forward WebSocket headers
+		for key, values := range originalReq.Header {
+			if strings.HasPrefix(key, "Sec-Websocket-") {
+				for _, value := range values {
+					req.Header.Add(key, value)
+				}
+			}
+		}
+	}
 }
 
 func main() {
@@ -315,6 +471,9 @@ func main() {
 
 	// Set up routes with logging
 	http.HandleFunc("/", loggingMiddleware(server.handleIndex))
+	http.HandleFunc("/login", loggingMiddleware(server.handleLogin))
+	http.HandleFunc("/logout", loggingMiddleware(server.handleLogout))
+	http.HandleFunc("/projects", loggingMiddleware(server.handleProjects))
 	http.HandleFunc("/send", loggingMiddleware(server.handleSend))
 	http.HandleFunc("/events", loggingMiddleware(server.handleSSE))
 	http.HandleFunc("/clear", loggingMiddleware(server.handleClear))
@@ -486,14 +645,9 @@ func (s *Server) getOrCreateSession(cookie string) (string, error) {
 	}
 
 	// Create new session
-	url := fmt.Sprintf("%s/session", s.sandbox.OpencodeURL())
-	log.Printf("getOrCreateSession: creating new session at %s", url)
+	log.Printf("getOrCreateSession: creating new session at %s/session", s.sandbox.OpencodeURL())
 
-	resp, err := http.Post(
-		url,
-		"application/json",
-		bytes.NewReader([]byte("{}")),
-	)
+	resp, err := s.opencodePost("/session", map[string]string{})
 	if err != nil {
 		log.Printf("getOrCreateSession: failed to create session - %v", err)
 		return "", err
@@ -512,17 +666,7 @@ func (s *Server) getOrCreateSession(cookie string) (string, error) {
 }
 
 func (s *Server) handleIndex(w http.ResponseWriter, r *http.Request) {
-	cookie, err := r.Cookie("session")
-	if err != nil {
-		// Generate new cookie
-		cookie = &http.Cookie{
-			Name:     "session",
-			Value:    fmt.Sprintf("sess_%d", time.Now().UnixNano()),
-			HttpOnly: true,
-			Path:     "/",
-		}
-		http.SetCookie(w, cookie)
-	}
+	cookie, _ := s.getSessionCookie(w, r)
 
 	// Ensure session exists
 	sessionID, err := s.getOrCreateSession(cookie.Value)
@@ -530,6 +674,8 @@ func (s *Server) handleIndex(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "Failed to create session", http.StatusInternalServerError)
 		return
 	}
+
+	authCtx := authContext(r)
 
 	// Get existing messages
 	messagesHTML := s.getMessagesHTML(sessionID)
@@ -542,40 +688,38 @@ func (s *Server) handleIndex(w http.ResponseWriter, r *http.Request) {
 		log.Printf("handleIndex: Detected preview port %d", previewPort)
 	}
 
-	// Prepare template data
-	data := struct {
-		Models       []ModelOption
-		DefaultModel string
-		MessagesHTML template.HTML
-		PreviewPort  int
-	}{
-		Models:       s.getAllModels(),
-		DefaultModel: "anthropic/claude-sonnet-4-20250514", // Default to Claude Sonnet 4
-		MessagesHTML: template.HTML(messagesHTML),
-		PreviewPort:  previewPort,
+	// Derive user initial from authentication context
+	userInitial := ""
+	if authCtx.IsAuthenticated && authCtx.Session != nil && len(authCtx.Session.Email) > 0 {
+		userInitial = strings.ToUpper(string(authCtx.Session.Email[0]))
 	}
 
-	w.Header().Set("Content-Type", "text/html")
-	if err := s.templates.ExecuteTemplate(w, "index", data); err != nil {
-		http.Error(w, "Template error", http.StatusInternalServerError)
-		log.Printf("Template error: %v", err)
+	// Prepare template data
+	data := struct {
+		Models          []ModelOption
+		DefaultModel    string
+		MessagesHTML    template.HTML
+		PreviewPort     int
+		IsAuthenticated bool
+		UserInitial     string
+	}{
+		Models:          s.getAllModels(),
+		DefaultModel:    "anthropic/claude-sonnet-4-20250514", // Default to Claude Sonnet 4
+		MessagesHTML:    template.HTML(messagesHTML),
+		PreviewPort:     previewPort,
+		IsAuthenticated: authCtx.IsAuthenticated,
+		UserInitial:     userInitial,
 	}
+
+	s.renderHTML(w, "index", data)
 }
 
 func (s *Server) handleSend(w http.ResponseWriter, r *http.Request) {
 	log.Printf("handleSend: received request")
 
-	cookie, err := r.Cookie("session")
-	if err != nil {
-		// No cookie exists, create a new one
-		log.Printf("handleSend: no session cookie, creating new one")
-		cookie = &http.Cookie{
-			Name:     "session",
-			Value:    fmt.Sprintf("sess_%d", time.Now().UnixNano()),
-			HttpOnly: true,
-			Path:     "/",
-		}
-		http.SetCookie(w, cookie)
+	cookie, isNew := s.getSessionCookie(w, r)
+	if isNew {
+		log.Printf("handleSend: created new session cookie")
 	}
 
 	sessionID, err := s.getOrCreateSession(cookie.Value)
@@ -620,11 +764,7 @@ func (s *Server) handleSend(w http.ResponseWriter, r *http.Request) {
 		Parts:     []MessagePartData{userPart},
 	}
 
-	w.Header().Set("Content-Type", "text/html")
-	if err := s.templates.ExecuteTemplate(w, "message", msgData); err != nil {
-		http.Error(w, "Template error", http.StatusInternalServerError)
-		return
-	}
+	s.renderHTML(w, "message", msgData)
 
 	// Then send message to opencode (this will trigger SSE response)
 	messageReq := struct {
@@ -675,12 +815,7 @@ func (s *Server) handleSend(w http.ResponseWriter, r *http.Request) {
 func (s *Server) handleSSE(w http.ResponseWriter, r *http.Request) {
 	log.Printf("handleSSE: new SSE connection")
 
-	cookie, err := r.Cookie("session")
-	if err != nil {
-		log.Printf("handleSSE: no session cookie")
-		http.Error(w, "No session", http.StatusBadRequest)
-		return
-	}
+	cookie, _ := s.getSessionCookie(w, r)
 
 	sessionID, err := s.getOrCreateSession(cookie.Value)
 	if err != nil {
@@ -878,11 +1013,7 @@ func (s *Server) handleSSE(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) handleClear(w http.ResponseWriter, r *http.Request) {
-	cookie, err := r.Cookie("session")
-	if err != nil {
-		http.Error(w, "No session", http.StatusBadRequest)
-		return
-	}
+	cookie, _ := s.getSessionCookie(w, r)
 
 	s.mu.RLock()
 	sessionID, exists := s.sessions[cookie.Value]
@@ -906,15 +1037,14 @@ func (s *Server) handleClear(w http.ResponseWriter, r *http.Request) {
 	s.mu.Unlock()
 
 	// Create new session
-	_, err = s.getOrCreateSession(cookie.Value)
+	_, err := s.getOrCreateSession(cookie.Value)
 	if err != nil {
 		http.Error(w, "Failed to create new session", http.StatusInternalServerError)
 		return
 	}
 
-	// Return empty messages div
-	w.Header().Set("Content-Type", "text/html")
-	fmt.Fprint(w, "<!-- Session cleared -->")
+	// Return session cleared template
+	s.renderHTML(w, "session-cleared", nil)
 }
 
 func (s *Server) getMessagesHTML(sessionID string) string {
@@ -989,8 +1119,6 @@ func min(a, b int) int {
 
 // Tab handler functions for HTMX requests
 func (s *Server) handleTabPreview(w http.ResponseWriter, r *http.Request) {
-	w.Header().Set("Content-Type", "text/html")
-
 	// Detect open ports in the sandbox
 	ports := s.detectOpenPorts()
 	var previewPort int
@@ -1005,15 +1133,10 @@ func (s *Server) handleTabPreview(w http.ResponseWriter, r *http.Request) {
 		PreviewPort: previewPort,
 	}
 
-	if err := s.templates.ExecuteTemplate(w, "tab-preview", data); err != nil {
-		http.Error(w, "Template error", http.StatusInternalServerError)
-		log.Printf("Tab preview template error: %v", err)
-	}
+	s.renderHTML(w, "tab-preview", data)
 }
 
 func (s *Server) handleTabCode(w http.ResponseWriter, r *http.Request) {
-	w.Header().Set("Content-Type", "text/html")
-
 	// Fetch all files from OpenCode sandbox
 	files, err := s.fetchAllFiles()
 	if err != nil {
@@ -1032,14 +1155,10 @@ func (s *Server) handleTabCode(w http.ResponseWriter, r *http.Request) {
 		LineCount: lineCount,
 	}
 
-	if err := s.templates.ExecuteTemplate(w, "tab-code", data); err != nil {
-		http.Error(w, "Template error", http.StatusInternalServerError)
-		log.Printf("Tab code template error: %v", err)
-	}
+	s.renderHTML(w, "tab-code", data)
 }
 
 func (s *Server) handleTabTerminal(w http.ResponseWriter, r *http.Request) {
-	w.Header().Set("Content-Type", "text/html")
 	data := map[string]interface{}{
 		"GottyURL": "",
 	}
@@ -1050,18 +1169,11 @@ func (s *Server) handleTabTerminal(w http.ResponseWriter, r *http.Request) {
 	} else {
 		log.Printf("Terminal tab: sandbox=%v, IsRunning=%v", s.sandbox != nil, s.sandbox != nil && s.sandbox.IsRunning())
 	}
-	if err := s.templates.ExecuteTemplate(w, "tab-terminal", data); err != nil {
-		http.Error(w, "Template error", http.StatusInternalServerError)
-		log.Printf("Tab terminal template error: %v", err)
-	}
+	s.renderHTML(w, "tab-terminal", data)
 }
 
 func (s *Server) handleTabDeployment(w http.ResponseWriter, r *http.Request) {
-	w.Header().Set("Content-Type", "text/html")
-	if err := s.templates.ExecuteTemplate(w, "tab-deployment", nil); err != nil {
-		http.Error(w, "Template error", http.StatusInternalServerError)
-		log.Printf("Tab deployment template error: %v", err)
-	}
+	s.renderHTML(w, "tab-deployment", nil)
 }
 
 // handleTerminalProxy proxies requests to the gotty terminal
@@ -1087,53 +1199,7 @@ func (s *Server) handleTerminalProxy(w http.ResponseWriter, r *http.Request) {
 
 	// Create reverse proxy
 	proxy := httputil.NewSingleHostReverseProxy(target)
-
-	// Configure the proxy director with path rewriting
-	proxy.Director = func(req *http.Request) {
-		req.URL.Scheme = target.Scheme
-		req.URL.Host = target.Host
-		req.Host = target.Host
-
-		// Critical: Strip "/terminal" prefix for gotty
-		originalPath := r.URL.Path
-		if strings.HasPrefix(originalPath, "/terminal") {
-			newPath := strings.TrimPrefix(originalPath, "/terminal")
-			if newPath == "" {
-				newPath = "/"
-			}
-			req.URL.Path = newPath
-		} else {
-			req.URL.Path = originalPath
-		}
-
-		// Preserve query parameters
-		req.URL.RawQuery = r.URL.RawQuery
-
-		// IMPORTANT: Set Origin header to match gotty's expectation
-		// Gotty v1.0.1 checks that Origin matches the Host
-		req.Header.Set("Origin", fmt.Sprintf("http://%s", target.Host))
-
-		// Forward important headers for WebSocket upgrade
-		if upgrade := r.Header.Get("Upgrade"); upgrade != "" {
-			req.Header.Set("Upgrade", upgrade)
-		}
-		if connection := r.Header.Get("Connection"); connection != "" {
-			req.Header.Set("Connection", connection)
-		}
-		// Forward WebSocket headers
-		for key, values := range r.Header {
-			if strings.HasPrefix(key, "Sec-Websocket-") {
-				for _, value := range values {
-					req.Header.Add(key, value)
-				}
-			}
-		}
-
-		// Log for debugging
-		log.Printf("Terminal proxy: %s -> %s (Origin: %s)", originalPath, req.URL.Path, req.Header.Get("Origin"))
-	}
-
-	// Better error handling
+	proxy.Director = s.createProxyDirector(target, "/terminal", r)
 	proxy.ErrorHandler = func(w http.ResponseWriter, r *http.Request, err error) {
 		log.Printf("Terminal proxy error for %s: %v", r.URL.Path, err)
 		http.Error(w, fmt.Sprintf("Terminal proxy error: %v", err), http.StatusBadGateway)
@@ -1154,16 +1220,7 @@ func (s *Server) handlePreviewProxy(w http.ResponseWriter, r *http.Request) {
 	ports := s.detectOpenPorts()
 	if len(ports) == 0 {
 		// Return a helpful message when no application is running
-		w.Header().Set("Content-Type", "text/html")
-		fmt.Fprintf(w, `
-			<div style="display: flex; align-items: center; justify-content: center; height: 100vh; font-family: system-ui, -apple-system, sans-serif;">
-				<div style="text-align: center;">
-					<h2 style="color: #666;">No Application Running</h2>
-					<p style="color: #999;">Start a web server on any port to see it here.</p>
-					<p style="color: #999; font-size: 0.9em;">Example: python -m http.server 5000</p>
-				</div>
-			</div>
-		`)
+		s.renderHTML(w, "preview-no-app", nil)
 		return
 	}
 
@@ -1189,44 +1246,17 @@ func (s *Server) handlePreviewProxy(w http.ResponseWriter, r *http.Request) {
 
 	// Create reverse proxy
 	proxy := httputil.NewSingleHostReverseProxy(target)
-
-	// Modify the request to point to the application server
-	originalDirector := proxy.Director
-	proxy.Director = func(req *http.Request) {
-		originalDirector(req)
-		req.Host = target.Host
-		req.URL.Host = target.Host
-		req.URL.Scheme = target.Scheme
-
-		// Strip /preview/ prefix so user's app gets clean paths
-		if strings.HasPrefix(req.URL.Path, "/preview/") {
-			req.URL.Path = strings.TrimPrefix(req.URL.Path, "/preview")
-			if req.URL.Path == "" {
-				req.URL.Path = "/"
-			}
-		}
-
-		// Handle WebSocket upgrade headers
-		if req.Header.Get("Upgrade") == "websocket" {
-			req.Header.Set("Origin", targetURL)
-		}
-	}
-
-	// Add error handling
+	proxy.Director = s.createProxyDirector(target, "/preview", r)
 	proxy.ErrorHandler = func(w http.ResponseWriter, r *http.Request, err error) {
 		log.Printf("Preview proxy error: %v", err)
 		// Return a user-friendly error message
-		w.Header().Set("Content-Type", "text/html")
 		w.WriteHeader(http.StatusBadGateway)
-		fmt.Fprintf(w, `
-			<div style="display: flex; align-items: center; justify-content: center; height: 100vh; font-family: system-ui, -apple-system, sans-serif;">
-				<div style="text-align: center;">
-					<h2 style="color: #d00;">Connection Error</h2>
-					<p style="color: #666;">Unable to connect to application on port %d</p>
-					<p style="color: #999; font-size: 0.9em;">The application may still be starting up. Try refreshing in a moment.</p>
-				</div>
-			</div>
-		`, port)
+		data := struct {
+			Port int
+		}{
+			Port: port,
+		}
+		s.renderHTML(w, "preview-connection-error", data)
 	}
 
 	// Serve the request
@@ -1253,24 +1283,11 @@ func (s *Server) handleKillPreviewPort(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// Execute kill command via OpenCode shell API
-	opencodeURL := s.sandbox.OpencodeURL()
-	shellURL := fmt.Sprintf("%s/session/%s/shell", opencodeURL, sessionID)
-
-	// Use the exact command format we tested
 	command := fmt.Sprintf("kill $(lsof -t -i:%s) 2>/dev/null || true", port)
-
-	payload := map[string]string{
-		"agent":   "agent",
-		"command": command,
-	}
-
-	reqBody, _ := json.Marshal(payload)
-	resp, err := http.Post(shellURL, "application/json", bytes.NewReader(reqBody))
+	_, err := s.executeShellCommand(sessionID, command)
 	if err != nil {
 		log.Printf("handleKillPreviewPort: Failed to execute kill command: %v", err)
 		// Continue anyway to refresh the preview
-	} else {
-		resp.Body.Close()
 	}
 
 	// Small delay to ensure process is killed
@@ -1278,6 +1295,147 @@ func (s *Server) handleKillPreviewPort(w http.ResponseWriter, r *http.Request) {
 
 	// Return the refreshed preview tab content
 	s.handleTabPreview(w, r)
+}
+
+// handleLogin shows the login page or processes login
+func (s *Server) handleLogin(w http.ResponseWriter, r *http.Request) {
+	if r.Method == "GET" {
+		authCtx := authContext(r)
+		// Check if already logged in
+		if authCtx.IsAuthenticated {
+			http.Redirect(w, r, "/projects", http.StatusSeeOther)
+			return
+		}
+
+		// Check if there's content in the chat
+		hasContent := r.URL.Query().Get("hasContent") == "true"
+
+		data := struct {
+			HasContent bool
+		}{
+			HasContent: hasContent,
+		}
+
+		s.renderHTML(w, "login", data)
+		return
+	}
+
+	if r.Method == "POST" {
+		// Parse form
+		if err := r.ParseForm(); err != nil {
+			http.Error(w, "Invalid form data", http.StatusBadRequest)
+			return
+		}
+
+		email := r.FormValue("email")
+		// Password validation would happen here in production
+
+		// Create auth session
+		s.createAuthSession(w, email)
+
+		// Check if we should redirect back to chat or to projects
+		hasContent := r.URL.Query().Get("hasContent") == "true"
+		if hasContent {
+			http.Redirect(w, r, "/", http.StatusSeeOther)
+		} else {
+			http.Redirect(w, r, "/projects", http.StatusSeeOther)
+		}
+	}
+}
+
+// handleLogout clears the auth session and shows logout page
+func (s *Server) handleLogout(w http.ResponseWriter, r *http.Request) {
+	// Clear the auth session
+	s.clearAuthSession(w, r)
+
+	// Render the logout success page
+	s.renderHTML(w, "logout", nil)
+}
+
+// handleProjects shows the projects page
+func (s *Server) handleProjects(w http.ResponseWriter, r *http.Request) {
+	// Only handle GET requests
+	if r.Method != "GET" {
+		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+
+	// Get user session from request context
+	authCtx := authContext(r)
+	authSession := authCtx.Session
+
+	// Extract user initial from email
+	userInitial := "U"
+	if authSession != nil && len(authSession.Email) > 0 {
+		userInitial = strings.ToUpper(string(authSession.Email[0]))
+	}
+
+	// Dummy project data
+	type Project struct {
+		ID        string
+		Name      string
+		Type      string
+		Language  string
+		FileCount int
+		LineCount int
+		CreatedAt string
+		UpdatedAt string
+	}
+
+	projects := []Project{
+		{
+			ID:        "proj1",
+			Name:      "E-Commerce Platform",
+			Type:      "Web",
+			Language:  "TypeScript",
+			FileCount: 156,
+			LineCount: 12453,
+			CreatedAt: "Jan 5, 2025",
+			UpdatedAt: "2 hours ago",
+		},
+		{
+			ID:        "proj2",
+			Name:      "User Auth Service",
+			Type:      "API",
+			Language:  "Go",
+			FileCount: 42,
+			LineCount: 3567,
+			CreatedAt: "Dec 28, 2024",
+			UpdatedAt: "Yesterday",
+		},
+		{
+			ID:        "proj3",
+			Name:      "Claude MCP Tool",
+			Type:      "MCP",
+			Language:  "Python",
+			FileCount: 23,
+			LineCount: 1890,
+			CreatedAt: "Jan 2, 2025",
+			UpdatedAt: "3 days ago",
+		},
+		{
+			ID:        "proj4",
+			Name:      "Sales Analytics",
+			Type:      "Data Science",
+			Language:  "Python",
+			FileCount: 18,
+			LineCount: 2134,
+			CreatedAt: "Dec 15, 2024",
+			UpdatedAt: "1 week ago",
+		},
+	}
+
+	data := struct {
+		UserEmail   string
+		UserInitial string
+		Projects    []Project
+	}{
+		UserEmail:   authSession.Email,
+		UserInitial: userInitial,
+		Projects:    projects,
+	}
+
+	s.renderHTML(w, "projects", data)
 }
 
 // fetchAllFiles recursively fetches all files from OpenCode sandbox
@@ -1357,46 +1515,15 @@ func (s *Server) detectOpenPorts() []int {
 
 // findUserPorts finds all listening ports excluding system services
 func (s *Server) findUserPorts(sessionID string) []int {
-	opencodeURL := s.sandbox.OpencodeURL()
-	shellURL := fmt.Sprintf("%s/session/%s/shell", opencodeURL, sessionID)
-
 	// Find all listening TCP ports
 	command := `lsof -i -sTCP:LISTEN -P -n | grep -o ':[0-9]*' | sed 's/://' | sort -u`
 
-	payload := map[string]string{
-		"agent":   "agent",
-		"command": command,
-	}
-
-	reqBody, _ := json.Marshal(payload)
-	resp, err := http.Post(shellURL, "application/json", bytes.NewReader(reqBody))
+	outputText, err := s.executeShellCommand(sessionID, command)
 	if err != nil {
 		log.Printf("findUserPorts: failed to execute command: %v", err)
 		return []int{}
 	}
-	defer resp.Body.Close()
-
-	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
-		log.Printf("findUserPorts: command failed with status %d", resp.StatusCode)
-		return []int{}
-	}
-
-	var shellResult MessageResponse
-	if err := json.NewDecoder(resp.Body).Decode(&shellResult); err != nil {
-		log.Printf("findUserPorts: failed to decode shell response: %v", err)
-		return []int{}
-	}
-
-	outputText := ""
-	for _, part := range shellResult.Parts {
-		if part.Type == "tool" && part.Tool == "bash" {
-			if out, ok := part.State["output"].(string); ok {
-				outputText = out
-				log.Printf("findUserPorts: raw lsof output: %q", outputText)
-				break
-			}
-		}
-	}
+	log.Printf("findUserPorts: raw lsof output: %q", outputText)
 
 	// Parse port numbers and filter out system ports
 	ports := []int{}
@@ -1459,41 +1586,18 @@ func (s *Server) calculateLineCount() int {
 		return 0
 	}
 
-	opencodeURL := s.sandbox.OpencodeURL()
-	shellURL := fmt.Sprintf("%s/session/%s/shell", opencodeURL, sessionID)
-
-	payload := map[string]string{
-		"agent":   "agent",
-		"command": "find . -type f -exec wc -l {} + 2>/dev/null | tail -1 | awk '{print $1}'",
-	}
-
-	payloadJSON, _ := json.Marshal(payload)
-	shellResp, err := http.Post(shellURL, "application/json", bytes.NewReader(payloadJSON))
+	command := "find . -type f -exec wc -l {} + 2>/dev/null | tail -1 | awk '{print $1}'"
+	output, err := s.executeShellCommand(sessionID, command)
 	if err != nil {
 		log.Printf("Failed to run shell command: %v", err)
 		return 0
 	}
-	defer shellResp.Body.Close()
 
-	// Parse response to extract line count
-	var shellResult MessageResponse
-	if err := json.NewDecoder(shellResp.Body).Decode(&shellResult); err != nil {
-		log.Printf("Failed to decode shell response: %v", err)
-		return 0
-	}
-
-	// Extract line count from output
-	for _, part := range shellResult.Parts {
-		if part.Type == "tool" && part.Tool == "bash" {
-			if output, ok := part.State["output"].(string); ok {
-				// Parse the number from output
-				output = strings.TrimSpace(output)
-				var lineCount int
-				fmt.Sscanf(output, "%d", &lineCount)
-				return lineCount
-			}
-		}
-	}
+	// Parse the number from output
+	output = strings.TrimSpace(output)
+	var lineCount int
+	fmt.Sscanf(output, "%d", &lineCount)
+	return lineCount
 
 	return 0
 }
@@ -1570,20 +1674,12 @@ func (s *Server) handleFileList(w http.ResponseWriter, r *http.Request) {
 		CurrentPath: currentPath,
 	}
 
-	w.Header().Set("Content-Type", "text/html")
-
 	// If options_only is true, return options with OOB counter updates
 	if optionsOnly {
-		if err := s.templates.ExecuteTemplate(w, "file-options-with-counts", data); err != nil {
-			log.Printf("Failed to render file options with counts: %v", err)
-			http.Error(w, "Template error", http.StatusInternalServerError)
-		}
+		s.renderHTML(w, "file-options-with-counts", data)
 	} else {
 		// Return the full select element
-		if err := s.templates.ExecuteTemplate(w, "file-dropdown", data); err != nil {
-			log.Printf("Failed to render file dropdown: %v", err)
-			http.Error(w, "Template error", http.StatusInternalServerError)
-		}
+		s.renderHTML(w, "file-dropdown", data)
 	}
 }
 
@@ -1603,14 +1699,9 @@ func (s *Server) handleFileContent(w http.ResponseWriter, r *http.Request) {
 		log.Printf("handleFileContent: saved selected file %s for session %s", filepath, cookie.Value)
 	}
 
-	w.Header().Set("Content-Type", "text/html")
-
 	if filepath == "" {
 		// Return placeholder template
-		if err := s.templates.ExecuteTemplate(w, "code-placeholder", nil); err != nil {
-			log.Printf("Failed to render code placeholder: %v", err)
-			http.Error(w, "Template error", http.StatusInternalServerError)
-		}
+		s.renderHTML(w, "code-placeholder", nil)
 		return
 	}
 
@@ -1637,10 +1728,7 @@ func (s *Server) handleFileContent(w http.ResponseWriter, r *http.Request) {
 		}{
 			Filepath: filepath,
 		}
-		if err := s.templates.ExecuteTemplate(w, "code-error", data); err != nil {
-			log.Printf("Failed to render code error: %v", err)
-			http.Error(w, "Template error", http.StatusInternalServerError)
-		}
+		s.renderHTML(w, "code-error", data)
 		return
 	}
 
@@ -1661,10 +1749,7 @@ func (s *Server) handleFileContent(w http.ResponseWriter, r *http.Request) {
 		Lines:    lines,
 	}
 
-	if err := s.templates.ExecuteTemplate(w, "code-content", data); err != nil {
-		log.Printf("Failed to render code content: %v", err)
-		http.Error(w, "Template error", http.StatusInternalServerError)
-	}
+	s.renderHTML(w, "code-content", data)
 }
 
 // handleDownload streams a zip file of the sandbox working directory to the client
