@@ -1,3 +1,22 @@
+// Check if chat has content for login redirect
+function checkChatContent() {
+    const messages = document.getElementById('messages');
+    if (messages) {
+        // Check if there are any message bubbles (excluding the SSE connection div)
+        const messageElements = messages.querySelectorAll('.bg-blue-100, .bg-gray-100');
+        return messageElements.length > 0;
+    }
+    return false;
+}
+
+// Handle login/signup click with content check
+function handleAuthClick(e, isLogin) {
+    e.preventDefault();
+    const hasContent = checkChatContent();
+    const url = hasContent ? '/login?hasContent=true' : '/login';
+    window.location.href = url;
+}
+
 // Debounce utility function
 function debounce(func, wait) {
     let timeout;

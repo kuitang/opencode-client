@@ -12,12 +12,12 @@ go build -o opencode-chat *.go
 # Development with live reload
 go run *.go -port 8080
 
-# Run all tests (organized by prefix)
-go test -v -timeout 60s
+# Run all tests
+go test -v -timeout 60s ./...
 
 # Run specific test categories
-go test -v -run "unit_" -timeout 60s     # Unit tests only
-go test -v -run "integration_" -timeout 60s  # Integration tests only
+make test-unit             # Unit tests only (no Docker)
+make test-integration      # Integration tests (Docker + auth)
 
 # Run single test
 go test -v -run TestServerStartup -timeout 60s
@@ -75,10 +75,9 @@ This is a **web-based chat interface for OpenCode** built with Go, HTMX 2, and S
 - `GET /models`: Returns `<option>` elements for dynamic model dropdown
 - `GET /events`: SSE endpoint that streams HTML fragments with `hx-swap-oob` for live updates
 
-**Test Organization**: Tests are prefixed for clear categorization:
-- `unit_*_test.go`: Pure Go logic testing (server, sessions, message parts)
-- `integration_*_test.go`: Full-stack tests with OpenCode subprocess (HTML parsing, SSE, isolation)
-- `integration_common_test.go`: Shared test utilities with polling helpers (`WaitForOpencodeReady`, `WaitForMessageProcessed`)
+**Test Organization**: Tests are consolidated into two primary suites:
+- `unit_test.go`: Pure Go logic (rendering, server helpers, concurrency utilities).
+- `integration_test.go`: Full-stack coverage (mocked HTTP/SSE flows, real sandbox flows, race/signal scenarios) plus shared helpers.
 
 **Error Handling**: Uses polling instead of fixed waits. The `waitForOpencodeReady()` function polls `/session` endpoint until OpenCode is responsive or timeout occurs.
 
@@ -114,10 +113,16 @@ Critical for testing: OpenCode subprocess must be properly cleaned up in test cl
 
 ### Playwright UI Tests
 
-The repository includes comprehensive Playwright tests for UI stability and scroll preservation in `test_resize_scenarios.js`. These tests ensure:
-- **Scroll position preservation** across viewport transitions (mobile ↔ desktop)
-- **Resize debouncing** prevents UI flickering during rapid viewport changes
-- **Input protection** prevents data loss when clicking outside chat with active text
+Playwright specs live under `test/ui/*.spec.js`. Key coverage includes:
+- Scroll preservation and responsive behaviour (`resize.spec.js`).
+- Preview/terminal flows, including sandbox-aware kill behaviour (`preview.spec.js`, `terminal.spec.js`).
+- SSE dropdown/stream behaviour and rendering regression checks.
+
+Run them headless with:
+
+```bash
+CI=1 PLAYWRIGHT_BASE_URL=http://localhost:6666 npx playwright test
+```
 - **Race condition handling** during simultaneous scrolling, resizing, and clicking
 
 To run Playwright tests with Claude Code's Playwright MCP:

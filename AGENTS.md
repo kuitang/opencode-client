@@ -7,23 +7,17 @@
 - Scripts/tools: `test_sse.sh`, `test_sse.js`, `analyze_sse.py` (dev utilities).
 - Logs and binaries may exist locally (`server.log`, `opencode-chat`); do not commit new artifacts.
 - Test suites:
-  - Unit tests (no Docker): consolidated into three files
-    - `unit_rendering_test.go` — templates, UI, and rendering pipeline
-    - `unit_server_test.go` — logging, message parts, readiness helpers
-    - `unit_race_test.go` — rate limiter and SSE duplication/concurrency
+  - Unit tests (no Docker): `unit_test.go` — rendering, server helpers, concurrency primitives.
   - Integration tests:
-    - `integration_http_test.go` — mocked HTTP/SSE rendering (NO Docker).
-    - `integration_flow_test.go` — regular flow tests (real sandbox).
-    - `integration_race_signal_test.go` — race + signal tests.
+    - `integration_test.go` — mocked HTTP/SSE rendering, real sandbox flows, and race/signal coverage.
 
 ## Build, Test, and Development Commands
 - Build: `go build -o opencode-chat .` — compiles the server.
 - Run: `go run .` — starts the app from source.
 - Tests (all): `go test ./...` (~30s across 3 suite sandboxes)
 - Unit tests only: `make test-unit` (no Docker)
-- Fast mocked only: `make test-fast` (no Docker)
-- Flow suite: `make test-flow` (Docker + `~/.local/share/opencode/auth.json`)
-- Race/Signals: `make test-race-signal` (Docker; signals build+run app)
+- Integration suite: `make test-integration` (Docker + `~/.local/share/opencode/auth.json`)
+- UI suite: `make test-ui` (builds server, runs Playwright headless on port 6666)
 - Verbose + race: `go test -v -race ./...`
 - Coverage: `go test -cover ./...`
 - Format: `go fmt ./...`  Lint: `go vet ./...`
@@ -37,7 +31,7 @@
 ## Testing Guidelines
 - Framework: standard `testing` package.
 - Use one sandbox/server per file via `RealSuiteServer(t, &SuiteHandle{})` (see `test_suite_helpers.go`). Do NOT start/stop Docker per test.
-- `integration_http_test.go` must stay mocked (no real sandbox). Use `httptest.Server` + `StaticURLSandbox`.
+- `integration_test.go` includes a mocked section (no real sandbox) and the real-sandbox suites. Use the existing helpers (`httptest.Server`, `StaticURLSandbox`, `RealSuiteServer`) as appropriate.
 - Real-sandbox tests should use `s.sandbox.OpencodeURL()` and not depend on internal fields (ports/paths).
 - Select models via `GetSupportedModelCombined` (discovers a valid provider/model from sandbox).
 - SSE tests must be bounded with context timeouts; do not hang.

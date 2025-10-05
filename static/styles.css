@@ -26,13 +26,15 @@
 
 /* Mobile Chat States */
 @media (max-width: 1023px) {
-    /* Ensure chat sticks to viewport bottom */
+    /* Keep chat aligned with primary navigation in compact layouts */
     .chat-responsive {
-        position: fixed !important;
-        bottom: 0 !important;
-        left: 0 !important;
-        right: 0 !important;
-        z-index: 50 !important;
+        position: static !important;
+        top: auto !important;
+        bottom: auto !important;
+        left: auto !important;
+        right: auto !important;
+        max-height: none !important;
+        box-shadow: none !important;
     }
     
     .chat-minimized {
@@ -48,8 +50,7 @@
     }
     
     .chat-expanded {
-        height: 80vh; /* Take up 80% of viewport height */
-        bottom: 0; /* Stick to viewport bottom */
+        height: auto;
         overflow: visible; /* Show all content when expanded */
         display: flex;
         flex-direction: column;
@@ -185,4 +186,3 @@
     transform: translateY(-100%) !important;
     opacity: 0 !important;
 }
-
