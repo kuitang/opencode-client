@@ -257,14 +257,6 @@ func renderMessage(templates *template.Template, msg MessageData) (string, error
 	return buf.String(), nil
 }
 
-// hasVisibleContent checks if a message part has visible content
-func hasVisibleContent(part MessagePart) bool {
-	if part.Type == "text" && part.Text != "" {
-		return true
-	}
-	return part.Type != ""
-}
-
 // parseRawMessagePart converts raw map data from SSE events into a MessagePart struct
 func parseRawMessagePart(partID string, partData map[string]interface{}) MessagePart {
 	msgPart := MessagePart{
