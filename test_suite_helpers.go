@@ -67,38 +67,6 @@ func RealSuiteServer(t testing.TB, h *SuiteHandle) *Server {
 	return h.server
 }
 
-// WaitForOpencodeReadyURL polls the sandbox base URL until session endpoint is up
-func WaitForOpencodeReadyURL(baseURL string, timeout time.Duration) error {
-	start := time.Now()
-	for time.Since(start) < timeout {
-		resp, err := http.Get(fmt.Sprintf("%s/session", baseURL))
-		if err == nil {
-			resp.Body.Close()
-			if resp.StatusCode == http.StatusOK || resp.StatusCode == http.StatusCreated {
-				return nil
-			}
-		}
-		time.Sleep(100 * time.Millisecond)
-	}
-	return fmt.Errorf("opencode at %s not ready after %v", baseURL, timeout)
-}
-
-// WaitForMessageProcessedURL waits for a message to appear via the sandbox API using base URL
-func WaitForMessageProcessedURL(baseURL, sessionID string, timeout time.Duration) error {
-	start := time.Now()
-	for time.Since(start) < timeout {
-		resp, err := http.Get(fmt.Sprintf("%s/session/%s/message", baseURL, sessionID))
-		if err == nil {
-			resp.Body.Close()
-			if resp.StatusCode == http.StatusOK {
-				return nil
-			}
-		}
-		time.Sleep(100 * time.Millisecond)
-	}
-	return fmt.Errorf("message not processed in session %s after %v", sessionID, timeout)
-}
-
 // GetSupportedModelCombined returns a provider/model string supported by the current sandbox
 func GetSupportedModelCombined(t *testing.T, s *Server) string {
 	// Prefer sandbox-reported defaults

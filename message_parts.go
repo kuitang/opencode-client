@@ -67,11 +67,6 @@ func (m *MessagePartsManager) GetParts(messageID string) []MessagePartData {
 	return result
 }
 
-// Clear removes all parts for a message
-func (m *MessagePartsManager) Clear(messageID string) {
-	delete(m.parts, messageID)
-}
-
 // ValidateAndExtractMessagePart validates and extracts message part data from SSE event
 func ValidateAndExtractMessagePart(event map[string]interface{}, sessionID string) (messageID, partID string, partData map[string]interface{}, err error) {
 	// Check event type
