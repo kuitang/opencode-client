@@ -1,8 +1,11 @@
 package middleware
 
 import (
+	"bufio"
 	"bytes"
+	"fmt"
 	"log"
+	"net"
 	"net/http"
 )
 
@@ -42,6 +45,21 @@ func (lw *LoggingResponseWriter) WriteHeader(code int) {
 func (lw *LoggingResponseWriter) Write(data []byte) (int, error) {
 	lw.Body.Write(data)
 	return lw.ResponseWriter.Write(data)
+}
+
+// Hijack implements http.Hijacker so WebSocket upgrades work through the logging wrapper.
+func (lw *LoggingResponseWriter) Hijack() (net.Conn, *bufio.ReadWriter, error) {
+	if hj, ok := lw.ResponseWriter.(http.Hijacker); ok {
+		return hj.Hijack()
+	}
+	return nil, nil, fmt.Errorf("underlying ResponseWriter does not implement http.Hijacker")
+}
+
+// Flush implements http.Flusher for streaming responses.
+func (lw *LoggingResponseWriter) Flush() {
+	if f, ok := lw.ResponseWriter.(http.Flusher); ok {
+		f.Flush()
+	}
 }
 
 func (lw *LoggingResponseWriter) LogResponse(method, path string) {
