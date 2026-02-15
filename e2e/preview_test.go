@@ -82,6 +82,9 @@ func TestPreview(t *testing.T) {
 	})
 
 	t.Run("shows and uses Kill button when an external server is detected", func(t *testing.T) {
+		if os.Getenv("CI") != "" {
+			t.Skip("Kill button test requires interactive terminal in sandbox; skipping in CI")
+		}
 		testPort := 5555
 		if v := os.Getenv("PREVIEW_TEST_SERVER_PORT"); v != "" {
 			if parsed, err := strconv.Atoi(v); err == nil {
