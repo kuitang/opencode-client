@@ -6,141 +6,129 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ```bash
 # Build and run
-go build -o opencode-chat *.go
+go build -o opencode-chat ./cmd/opencode-chat
 ./opencode-chat -port 8080
 
 # Development with live reload
-go run *.go -port 8080
+go run ./cmd/opencode-chat -port 8080
 
 # Run all tests
 go test -v -timeout 60s ./...
 
 # Run specific test categories
-make test-unit             # Unit tests only (no Docker)
+make test-unit             # Unit + property tests (no Docker)
 make test-integration      # Integration tests (Docker + auth)
+make test-e2e              # Build app, launch, run Playwright E2E tests
 
 # Run single test
-go test -v -run TestServerStartup -timeout 60s
+go test -v -run TestUnitMessageFormatting -timeout 60s ./internal/server/
 
 # Test with coverage
-go test -v -cover -timeout 60s
+go test -v -cover -timeout 60s ./...
 
 # Build for deployment
-go build -ldflags="-s -w" -o opencode-chat *.go
+go build -ldflags="-s -w" -o opencode-chat ./cmd/opencode-chat
 ```
 
 ## Architecture Overview
 
-This is a **web-based chat interface for OpenCode** built with Go, HTMX 2, and Server-Sent Events. The architecture centers around **subprocess management**, **session bridging**, and **real-time streaming**.
+This is a **web-based chat interface for OpenCode** built with Go, HTMX 2, and Server-Sent Events. The architecture centers around **sandbox management**, **session bridging**, and **real-time streaming**.
+
+### Project Layout
+
+```
+cmd/opencode-chat/main.go          # Entrypoint: flag parsing, sandbox init, signal handling
+internal/
+  models/types.go                   # Shared API/data types (Provider, MessagePart, etc.)
+  sandbox/                          # Sandbox interface + implementations (Docker, Fly.io, test stub)
+  auth/auth.go                      # Auth types (AuthSession, AuthContext) + helpers
+  middleware/middleware.go           # HTTP middleware (logging, chaining)
+  templates/embed.go                # embed.FS for HTML templates + static assets
+  views/views.go                    # Rendering: markdown, tool details, message transforms
+  sse/parts.go                      # MessagePartsManager + SSE event validation
+  server/                           # HTTP server, routes, all handlers
+    server.go                       # Server struct, NewServer, rate limiter
+    routes.go                       # RegisterRoutes (Go 1.22+ method routing)
+    handlers_chat.go                # handleIndex, handleSend, handleSSE, handleClear
+    handlers_tabs.go                # Tab handlers (preview, code, terminal, deployment)
+    handlers_proxy.go               # Reverse proxies (terminal, preview)
+    handlers_files.go               # File content, file list, download, ports
+    handlers_auth.go                # Login/logout, auth session management
+    opcode_client.go                # OpenCode API client helpers
+    session.go                      # Session cookie + workspace session management
+```
+
+### Package Dependency Graph (no cycles)
+
+```
+models      → (stdlib only)
+sandbox     → models
+auth        → (stdlib only)
+middleware  → (stdlib only)
+templates   → (stdlib only, embed)
+views       → models, templates
+sse         → views
+server      → models, sandbox, auth, middleware, views, sse, templates
+cmd/main    → server, sandbox
+```
 
 ### Core Components
 
-**`main.go`** - Primary server containing:
-- `Server` struct: Manages OpenCode subprocess, sessions, providers, templates
-- HTTP handlers: `/`, `/send`, `/events` (SSE), `/clear`, `/messages`, `/models`
-- OpenCode subprocess lifecycle: `startOpencodeServer()`, `stopOpencodeServer()`, `verifyOpencodeIsolation()`
-- Security isolation: Each OpenCode instance runs in isolated temporary directory
+**`internal/server/`** - HTTP server containing:
+- `Server` struct: Manages OpenCode sandbox, sessions, providers, templates
+- HTTP handlers with Go 1.22+ method routing (`"GET /{$}"`, `"POST /send"`, etc.)
+- Sandbox lifecycle via `Sandbox` interface (Docker, Fly.io)
 - Graceful shutdown: Signal handling with proper cleanup
 
-**`message_parts.go`** - SSE streaming utilities:
+**`internal/sse/parts.go`** - SSE streaming utilities:
 - `MessagePartsManager`: Manages chronological ordering of message parts during streaming
 - `ValidateAndExtractMessagePart()`: Parses OpenCode SSE events for session-specific filtering
-- Single-goroutine design: Each SSE connection gets its own manager instance
+
+**`internal/views/views.go`** - Rendering pipeline:
+- Markdown rendering with XSS sanitization (blackfriday + bluemonday)
+- Tool output rendering with collapsible details
+- Message part transformation from API types to rendered HTML
 
 ### Critical Architecture Patterns
 
-**Session Bridging**: Browser cookies map to OpenCode session IDs. The server maintains this mapping in `sessions map[string]string` and creates OpenCode sessions on-demand via `/session` endpoint.
+**Session Bridging**: Browser cookies map to OpenCode session IDs. The server maintains this mapping and creates OpenCode sessions on-demand via `/session` endpoint.
 
-**Process Isolation**: Each server instance spawns OpenCode in an isolated temporary directory (`/tmp/opencode-chat-pid{PID}-*`) for security. The `verifyOpencodeIsolation()` function ensures OpenCode cannot access the parent directory.
+**Sandbox Isolation**: Uses Docker containers (or Fly.io machines) to run OpenCode in isolation. Each container gets its own auth config and port mapping.
 
-**SSE Event Filtering**: OpenCode provides a global `/event` endpoint streaming ALL sessions. The client-side filtering happens in `handleSSE()` by parsing each event's `sessionID` and only forwarding relevant events.
+**SSE Event Filtering**: OpenCode provides a global `/event` endpoint streaming ALL sessions. The server-side filtering happens in `handleSSE()` by parsing each event's `sessionID` and only forwarding relevant events.
 
-**Template Architecture**: Uses `embed.FS` for templates and static files. The `NewServer()` constructor parses templates with helper functions. Two key templates:
-- `index.html`: Main page with HTMX-enabled form, SSE connection, and connection status flash
-- `message.html`: Reusable partial for message bubbles (used in streaming and static rendering)
-
-**Port Strategy**: HTTP port + 1000 = OpenCode port (predictable, avoids conflicts)
+**Template Architecture**: Uses `embed.FS` for templates and static files. Templates live in `internal/templates/templates/` and are loaded via `views.LoadTemplates()`.
 
 ## Key Implementation Details
 
 **Graceful Shutdown**: The server handles SIGINT/SIGTERM by:
 1. Shutting down HTTP server with 5s timeout
-2. Sending SIGINT to OpenCode subprocess  
-3. Waiting 2s for graceful exit, then force-kill
-4. Cleaning up temporary directory
-5. Using defer cleanup to handle panics
+2. Stopping sandbox (Docker container cleanup)
+3. Using defer cleanup to handle panics
 
 **HTMX Integration**: All endpoints return HTML fragments (never JSON):
 - `POST /send`: Returns message bubble HTML for immediate UI update
-- `GET /models`: Returns `<option>` elements for dynamic model dropdown
 - `GET /events`: SSE endpoint that streams HTML fragments with `hx-swap-oob` for live updates
 
-**Test Organization**: Tests are consolidated into two primary suites:
+**Test Organization**: Tests live in `internal/server/` and `e2e/`:
 - `unit_test.go`: Pure Go logic (rendering, server helpers, concurrency utilities).
-- `integration_test.go`: Full-stack coverage (mocked HTTP/SSE flows, real sandbox flows, race/signal scenarios) plus shared helpers.
+- `prop_test.go`: Property-based tests using `pgregory.net/rapid`.
+- `integration_test.go`: Full-stack coverage (mocked HTTP/SSE flows, real sandbox flows, race/signal scenarios).
+- `e2e/`: Browser-based E2E tests using `playwright-go` (resize, preview, terminal, SSE, layout).
 
-**Error Handling**: Uses polling instead of fixed waits. The `waitForOpencodeReady()` function polls `/session` endpoint until OpenCode is responsive or timeout occurs.
-
-**Connection Status Flash**: Client-side user feedback system that provides real-time connection status updates:
-- **SSE Connection Events**: Listens to `htmx:sseError`, `htmx:sseOpen`, `htmx:sseClose` for real-time connection status
-- **Send Error Handling**: Responds to `htmx:sendError`, `htmx:responseError`, `htmx:timeout` for message send failures
-- **Smart Messaging**: Contextual error messages (rate limits, server errors, timeouts, connection issues)
-- **Auto-hide Logic**: Success messages auto-hide after 2s, warnings/errors persist until resolved
-- **Tailwind Integration**: Uses `bg-amber-500` (warnings), `bg-green-500` (success), `bg-red-500` (errors)
-- **Responsive Design**: Works seamlessly across mobile/desktop viewport transitions
+**Error Handling**: Uses polling instead of fixed waits. The `sandbox.WaitForOpencodeReady()` function polls `/session` endpoint until OpenCode is responsive or timeout occurs.
 
 ## Security Considerations
 
-- OpenCode runs in isolated temporary directories with PID in name for uniqueness
-- `verifyOpencodeIsolation()` confirms OpenCode's working directory matches expected isolation
+- OpenCode runs in isolated Docker containers
 - Session cookies are HttpOnly and path-scoped
 - No client-side secrets or API keys (OpenCode handles authentication)
-- Graceful cleanup prevents temporary directory leakage
+- Graceful cleanup prevents container leakage
 
 ## Testing Guidelines
 
 ### Go Tests
 
-All tests use dynamic port allocation (`GetTestPort()`) to avoid conflicts. Integration tests properly wait for OpenCode readiness using polling instead of fixed sleeps. The `StartTestServer()` helper handles the full OpenCode startup sequence for integration tests.
+All tests use dynamic port allocation to avoid conflicts. Integration tests properly wait for OpenCode readiness using polling instead of fixed sleeps. The `RealSuiteServer()` helper handles the full sandbox startup sequence for integration tests.
 
-Critical for testing: OpenCode subprocess must be properly cleaned up in test cleanup to prevent orphaned processes. Use `defer server.stopOpencodeServer()` in all integration tests.
-
-**Connection Flash Testing**: The test suite includes comprehensive coverage for the connection status flash:
-- `testConnectionFlashFunctionality()` - Tests basic flash show/hide with different status types
-- `testFlashDuringResize()` - Validates flash persistence during viewport transitions
-- `testSendFailureFlash()` - Tests HTMX send error event handling (network errors, timeouts, server errors)
-- `testSSEEventHandlers()` - Tests SSE connection event simulation
-
-### Playwright UI Tests
-
-Playwright specs live under `test/ui/*.spec.js`. Key coverage includes:
-- Scroll preservation and responsive behaviour (`resize.spec.js`).
-- Preview/terminal flows, including sandbox-aware kill behaviour (`preview.spec.js`, `terminal.spec.js`).
-- SSE dropdown/stream behaviour and rendering regression checks.
-
-Run them headless with:
-
-```bash
-CI=1 PLAYWRIGHT_BASE_URL=http://localhost:6666 npx playwright test
-```
-- **Race condition handling** during simultaneous scrolling, resizing, and clicking
-
-To run Playwright tests with Claude Code's Playwright MCP:
-
-```bash
-# 1. Build and start the server
-go build -o opencode-chat *.go && ./opencode-chat -port 8080
-
-# 2. In Claude Code with Playwright MCP enabled:
-# - Navigate to http://localhost:8080
-# - Execute test functions via page.evaluate() from test_resize_scenarios.js
-
-# 3. Run all tests:
-# Copy the test functions into page.evaluate() or run:
-# - testScrollPositionPreservation() - CRITICAL: Tests scroll preservation
-# - testRapidResizeTransitions() - Tests debouncing mechanism
-# - testComplexInteractions() - Tests race conditions
-# - testScrollPreservationWithToggle() - Tests mobile toggle scroll preservation
-```
-
-The test suite validates all critical UI edge cases identified in `docs/002-ui-code-review.md`.
+Critical for testing: Sandbox must be properly cleaned up in test cleanup to prevent orphaned containers.

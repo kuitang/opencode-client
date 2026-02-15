@@ -3,7 +3,7 @@ name: CI
 on:
   push:
     branches:
-      - master
+      - main
   pull_request:
 
 jobs:
@@ -20,12 +20,7 @@ jobs:
       - name: Set up Go
         uses: actions/setup-go@v5
         with:
-          go-version: '1.23'
-
-      - name: Set up Node.js
-        uses: actions/setup-node@v4
-        with:
-          node-version: '18'
+          go-version: '1.24'
 
       - name: Prepare OpenCode auth config
         run: |
@@ -43,20 +38,30 @@ jobs:
       - name: Install Go dependencies
         run: go mod download
 
-      - name: Install Node dependencies
-        run: npm ci
+      - name: Vet
+        run: go vet ./...
 
-      - name: Install Playwright browsers
-        run: npx playwright install --with-deps chromium
-
-      - name: Run Go unit tests
+      - name: Run unit tests
         run: make test-unit
 
-      - name: Run Go integration tests
+      - name: Run integration tests
         run: make test-integration
 
-      - name: Run Playwright UI tests
-        run: make test-ui
+      - name: Build app for E2E
+        run: go build -o opencode-chat ./cmd/opencode-chat
+
+      - name: Install Playwright browsers
+        run: go run github.com/playwright-community/playwright-go/cmd/playwright install --with-deps chromium
+
+      - name: Run E2E tests
+        run: |
+          ./opencode-chat -port 9876 &
+          APP_PID=$!
+          sleep 2
+          E2E_BASE_URL=http://localhost:9876 go test -v -timeout 120s ./e2e/... || EXIT_CODE=$?
+          kill $APP_PID 2>/dev/null || true
+          wait $APP_PID 2>/dev/null || true
+          exit ${EXIT_CODE:-0}
 
       - name: Upload server logs on failure
         if: failure()

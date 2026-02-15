@@ -35,8 +35,6 @@ build/
 Thumbs.db
 
 *.json
-!package.json
-!package-lock.json
 *.txt
 .gocache/*
 .playwright-mcp/*
@@ -46,6 +44,9 @@ coverage.out
 
 # Node project artifacts
 node_modules/
+
+# Rapid property-test failure regression files
+**/testdata/rapid/
 
 # Ignore local trace-auth tool
 cmd/trace-auth/

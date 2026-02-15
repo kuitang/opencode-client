@@ -1,11 +1,11 @@
-# ---- Stage: Official Node runtime (latest) ----
-FROM node:slim AS node
+# ---- Stage: Official Node runtime (trixie-slim) ----
+FROM node:trixie-slim AS node
 
-# ---- Stage: Official Go toolchain (latest) ----  
-FROM golang:latest AS golang
+# ---- Stage: Official Go toolchain (trixie) ----
+FROM golang:trixie AS golang
 
-# ---- Final: Python slim + Node + Go ----
-FROM python:slim
+# ---- Final: Python slim-trixie + Node + Go ----
+FROM python:slim-trixie
 
 # Set Python environment variables for optimization
 ENV PYTHONUNBUFFERED=1 \
@@ -15,17 +15,18 @@ ENV PYTHONUNBUFFERED=1 \
 
 # Install essential packages and gotty dependencies
 RUN apt-get update && apt-get install -y --no-install-recommends \
-    ca-certificates curl unzip git zip wget htop lsof \
-    procps net-tools psmisc iproute2 socat \
+    ca-certificates curl git htop iproute2 lsof \
+    net-tools procps psmisc socat unzip wget zip \
  && rm -rf /var/lib/apt/lists/*
 
-# Install gotty binary (updated version from sorenisanerd)
-RUN wget -q https://github.com/sorenisanerd/gotty/releases/download/v1.6.0/gotty_v1.6.0_linux_amd64.tar.gz \
-    && tar -xzf gotty_v1.6.0_linux_amd64.tar.gz -C /usr/local/bin \
-    && rm gotty_v1.6.0_linux_amd64.tar.gz \
+# Install gotty binary (multi-arch via TARGETARCH)
+ARG TARGETARCH
+RUN ARCH="${TARGETARCH:-amd64}" && \
+    wget -q "https://github.com/sorenisanerd/gotty/releases/download/v1.6.0/gotty_v1.6.0_linux_${ARCH}.tar.gz" \
+    && tar -xzf "gotty_v1.6.0_linux_${ARCH}.tar.gz" -C /usr/local/bin \
+    && rm "gotty_v1.6.0_linux_${ARCH}.tar.gz" \
     && chmod +x /usr/local/bin/gotty \
-    && echo "Gotty version:" && gotty --version \
-    && echo "Gotty help output:" && gotty --help | grep -E "(ws-origin|permit-write)" || true
+    && echo "Gotty version:" && gotty --version
 
 # Copy entire Node.js installation from the official Node image
 COPY --from=node /usr/local/ /usr/local/
@@ -41,13 +42,9 @@ RUN npm install -g opencode-ai@latest
 RUN groupadd -r -g 1001 opencode && \
     useradd -r -u 1001 -g opencode -m -d /home/opencode opencode
 
-# Create working directory and set ownership
-RUN mkdir -p /app && \
-    chown -R opencode:opencode /app
-
-# Create directories for auth configuration
-RUN mkdir -p /home/opencode/.local/share/opencode && \
-    chown -R opencode:opencode /home/opencode/.local
+# Create working directory, auth config directory, and set ownership
+RUN mkdir -p /app /home/opencode/.local/share/opencode && \
+    chown -R opencode:opencode /app /home/opencode/.local
 
 # Copy entrypoint script and gotty config (must be done as root)
 COPY sandbox/entrypoint.sh /usr/local/bin/entrypoint.sh
@@ -60,15 +57,12 @@ USER opencode
 # Set working directory
 WORKDIR /app
 
-# Expose default OpenCode port
-EXPOSE 8080
+# Expose OpenCode and gotty ports
+EXPOSE 8080 8081
 
 # Health check to verify OpenCode is running
 HEALTHCHECK --interval=30s --timeout=10s --start-period=5s --retries=3 \
     CMD curl -f http://localhost:8080/health || exit 1
-
-# Expose gotty port in addition to OpenCode port
-EXPOSE 8081
 
 # Use the entrypoint script to start both services
 ENTRYPOINT ["/usr/local/bin/entrypoint.sh"]

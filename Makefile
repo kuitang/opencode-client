@@ -4,15 +4,15 @@ BIN ?= opencode-chat
 PKG ?= ./...
 
 .PHONY: build run test test-verbose test-race cover fmt vet lint check clean help \
-	 test-unit test-integration test-ui
+	 test-unit test-integration test-e2e
 
 ## build: Compile the binary to ./$(BIN)
 build:
-	go build -o $(BIN) .
+	go build -o $(BIN) ./cmd/opencode-chat
 
 ## run: Start the app from source
 run:
-	go run .
+	go run ./cmd/opencode-chat
 
 ## test: Run all tests
 test:
@@ -26,21 +26,31 @@ test-verbose:
 test-race:
 	go test -race $(PKG)
 
-## test-unit: Run consolidated unit tests only (no Docker)
+## test-unit: Run unit + property tests (no Docker)
 test-unit:
-	go test -v -run '^TestUnit' ./...
+	go test -v -timeout 60s -run '^(TestUnit|TestProp)' ./...
 
 ## test-integration: Run consolidated integration tests (requires Docker + auth.json)
 test-integration:
 	go test -v -run '^TestIntegration' ./...
 
-## test-ui: Run Playwright UI tests (requires Node + Playwright browsers)
-test-ui: build
-	@bash -lc 'set -euo pipefail; \
-	  ./$(BIN) -port 6666 > /tmp/opencode-chat-ui.log 2>&1 & \
-	  pid=$$!; trap "kill $$pid" EXIT; \
-	  sleep 8; \
-	  CI=1 PLAYWRIGHT_ALLOWED_PORTS=6666 PLAYWRIGHT_BASE_URL=http://localhost:6666 npx playwright test'
+## test-e2e: Build app, start it, run E2E tests, then stop it
+test-e2e:
+	@echo "Building app..."
+	go build -o $(BIN) ./cmd/opencode-chat
+	@echo "Starting app on port 9876..."
+	./$(BIN) -port 9876 &
+	@APP_PID=$$!; \
+	sleep 2; \
+	echo "Running E2E tests..."; \
+	E2E_BASE_URL=http://localhost:9876 \
+	PLAYWRIGHT_CHROMIUM_EXECUTABLE_PATH=$${PLAYWRIGHT_CHROMIUM_EXECUTABLE_PATH:-} \
+	go test -v -timeout 120s ./e2e/... ; \
+	EXIT_CODE=$$?; \
+	echo "Stopping app (PID $$APP_PID)..."; \
+	kill $$APP_PID 2>/dev/null || true; \
+	wait $$APP_PID 2>/dev/null || true; \
+	exit $$EXIT_CODE
 
 ## cover: Run tests with coverage summary
 cover:
@@ -72,9 +82,9 @@ help:
 	@echo "  test         Run all tests"
 	@echo "  test-verbose Run tests with -v"
 	@echo "  test-race    Run tests with race detector"
-	@echo "  test-unit    Run consolidated unit tests (no Docker)"
+	@echo "  test-unit    Run unit + property tests (no Docker)"
 	@echo "  test-integration Run consolidated integration tests (Docker)"
-	@echo "  test-ui      Run Playwright UI tests"
+	@echo "  test-e2e     Build+launch app, run E2E Playwright tests"
 	@echo "  cover        Run coverage summary"
 	@echo "  fmt          Format code"
 	@echo "  vet          Static analysis"
