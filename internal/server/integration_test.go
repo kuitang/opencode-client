@@ -1836,9 +1836,9 @@ func TestIntegrationSSEContextCancellation(t *testing.T) {
 
 func TestIntegrationSignalHandling(t *testing.T) {
 	buildCmd := exec.Command("go", "build", "-o", "test-opencode-chat", "./cmd/opencode-chat")
-	buildCmd.Dir = filepath.Join(getBuildDir())
-	if err := buildCmd.Run(); err != nil {
-		t.Fatalf("build: %v", err)
+	buildCmd.Dir = getBuildDir()
+	if output, err := buildCmd.CombinedOutput(); err != nil {
+		t.Fatalf("build in %s: %v\n%s", getBuildDir(), err, output)
 	}
 	binaryPath := filepath.Join(getBuildDir(), "test-opencode-chat")
 	defer os.Remove(binaryPath)
@@ -1875,9 +1875,9 @@ func TestIntegrationSignalHandling(t *testing.T) {
 
 func TestIntegrationOpencodeCleanupOnSignal(t *testing.T) {
 	buildCmd := exec.Command("go", "build", "-o", "test-opencode-chat", "./cmd/opencode-chat")
-	buildCmd.Dir = filepath.Join(getBuildDir())
-	if err := buildCmd.Run(); err != nil {
-		t.Fatalf("build: %v", err)
+	buildCmd.Dir = getBuildDir()
+	if output, err := buildCmd.CombinedOutput(); err != nil {
+		t.Fatalf("build in %s: %v\n%s", getBuildDir(), err, output)
 	}
 	binaryPath := filepath.Join(getBuildDir(), "test-opencode-chat")
 	defer os.Remove(binaryPath)
@@ -1978,9 +1978,9 @@ func TestIntegrationDockerContainerCleanupOnStartup(t *testing.T) {
 
 	// Build and start the application
 	buildCmd := exec.Command("go", "build", "-o", "test-opencode-chat", "./cmd/opencode-chat")
-	buildCmd.Dir = filepath.Join(getBuildDir())
-	if err := buildCmd.Run(); err != nil {
-		t.Fatalf("build: %v", err)
+	buildCmd.Dir = getBuildDir()
+	if output, err := buildCmd.CombinedOutput(); err != nil {
+		t.Fatalf("build in %s: %v\n%s", getBuildDir(), err, output)
 	}
 	binaryPath := filepath.Join(getBuildDir(), "test-opencode-chat")
 	defer os.Remove(binaryPath)
@@ -2039,11 +2039,21 @@ func TestIntegrationDockerContainerCleanupOnStartup(t *testing.T) {
 	}
 }
 
-// getBuildDir returns the project root directory where `go build .` should run.
-// Since this test file is now in internal/server, the binary build target is the
-// repository root (two levels up from this package).
+// getBuildDir returns the project root directory where `go build ./cmd/opencode-chat` should run.
 func getBuildDir() string {
-	// Navigate from internal/server to the project root
-	_, filename, _, _ := runtime.Caller(0)
-	return filepath.Join(filepath.Dir(filename), "..", "..")
+	// Walk up from cwd to find go.mod (project root)
+	dir, err := os.Getwd()
+	if err != nil {
+		panic("getBuildDir: " + err.Error())
+	}
+	for {
+		if _, err := os.Stat(filepath.Join(dir, "go.mod")); err == nil {
+			return dir
+		}
+		parent := filepath.Dir(dir)
+		if parent == dir {
+			panic("getBuildDir: go.mod not found in any parent directory")
+		}
+		dir = parent
+	}
 }
