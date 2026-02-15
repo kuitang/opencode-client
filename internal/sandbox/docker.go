@@ -231,10 +231,15 @@ func (ld *LocalDockerSandbox) ensureImage() error {
 }
 
 func (ld *LocalDockerSandbox) buildImage() error {
+	root, err := findProjectRoot()
+	if err != nil {
+		return fmt.Errorf("failed to find project root: %w", err)
+	}
 	cmd := exec.CommandContext(ld.ctx, "docker", "build",
 		"-t", dockerImageName+":latest",
 		"-f", "sandbox/Dockerfile",
 		".")
+	cmd.Dir = root
 	output, err := cmd.CombinedOutput()
 	if err != nil {
 		log.Printf("Docker build output: %s", string(output))
@@ -242,6 +247,25 @@ func (ld *LocalDockerSandbox) buildImage() error {
 	}
 	log.Printf("LocalDocker: Build completed successfully")
 	return nil
+}
+
+// findProjectRoot walks up from the current working directory to find
+// the directory containing go.mod (the project root).
+func findProjectRoot() (string, error) {
+	dir, err := os.Getwd()
+	if err != nil {
+		return "", err
+	}
+	for {
+		if _, err := os.Stat(dir + "/go.mod"); err == nil {
+			return dir, nil
+		}
+		parent := dir[:strings.LastIndex(dir, "/")]
+		if parent == dir {
+			return "", fmt.Errorf("go.mod not found in any parent directory")
+		}
+		dir = parent
+	}
 }
 
 func (ld *LocalDockerSandbox) createContainer() error {

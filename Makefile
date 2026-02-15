@@ -28,11 +28,11 @@ test-race:
 
 ## test-unit: Run unit + property tests (no Docker)
 test-unit:
-	go test -v -timeout 60s -run '^(TestUnit|TestProp)' ./...
+	go test -v -timeout 60s -run '^(TestUnit|TestProp)' ./internal/...
 
 ## test-integration: Run consolidated integration tests (requires Docker + auth.json)
 test-integration:
-	go test -v -run '^TestIntegration' ./...
+	go test -v -run '^TestIntegration' ./internal/...
 
 ## test-e2e: Build app, start it, run E2E tests, then stop it
 test-e2e:
