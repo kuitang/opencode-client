@@ -1835,7 +1835,7 @@ func TestIntegrationSSEContextCancellation(t *testing.T) {
 // ===== Full app signal tests (build + run binary) =====
 
 func TestIntegrationSignalHandling(t *testing.T) {
-	buildCmd := exec.Command("go", "build", "-o", "test-opencode-chat", ".")
+	buildCmd := exec.Command("go", "build", "-o", "test-opencode-chat", "./cmd/opencode-chat")
 	buildCmd.Dir = filepath.Join(getBuildDir())
 	if err := buildCmd.Run(); err != nil {
 		t.Fatalf("build: %v", err)
@@ -1874,7 +1874,7 @@ func TestIntegrationSignalHandling(t *testing.T) {
 }
 
 func TestIntegrationOpencodeCleanupOnSignal(t *testing.T) {
-	buildCmd := exec.Command("go", "build", "-o", "test-opencode-chat", ".")
+	buildCmd := exec.Command("go", "build", "-o", "test-opencode-chat", "./cmd/opencode-chat")
 	buildCmd.Dir = filepath.Join(getBuildDir())
 	if err := buildCmd.Run(); err != nil {
 		t.Fatalf("build: %v", err)
@@ -1977,7 +1977,7 @@ func TestIntegrationDockerContainerCleanupOnStartup(t *testing.T) {
 	}
 
 	// Build and start the application
-	buildCmd := exec.Command("go", "build", "-o", "test-opencode-chat", ".")
+	buildCmd := exec.Command("go", "build", "-o", "test-opencode-chat", "./cmd/opencode-chat")
 	buildCmd.Dir = filepath.Join(getBuildDir())
 	if err := buildCmd.Run(); err != nil {
 		t.Fatalf("build: %v", err)
