@@ -1,7 +1,7 @@
-# Binaries
-opencode-chat
-vibecoding-chat
-*-chat
+# Binaries (root only — don't match cmd/opencode-chat/ directory)
+/opencode-chat
+/vibecoding-chat
+/test-opencode-chat
 opencode-chat.test
 *.test
 
