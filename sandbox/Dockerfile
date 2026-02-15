@@ -15,7 +15,7 @@ ENV PYTHONUNBUFFERED=1 \
 
 # Install essential packages and gotty dependencies
 RUN apt-get update && apt-get install -y --no-install-recommends \
-    ca-certificates curl git htop iproute2 lsof \
+    ca-certificates curl git htop iproute2 libatomic1 lsof \
     net-tools procps psmisc socat unzip wget zip \
  && rm -rf /var/lib/apt/lists/*
 
