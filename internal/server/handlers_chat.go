@@ -322,6 +322,53 @@ func (s *Server) handleSSE(w http.ResponseWriter, r *http.Request) {
 					})
 				}
 			}
+
+			if event["type"] == "question.asked" {
+				if props, ok := event["properties"].(map[string]any); ok {
+					qSessionID, _ := props["sessionID"].(string)
+					if qSessionID != sessionID {
+						continue
+					}
+
+					requestID, _ := props["id"].(string)
+
+					// Re-marshal to struct for clean extraction
+					propsJSON, err := json.Marshal(props)
+					if err != nil {
+						log.Printf("SSE: Failed to marshal question properties: %v", err)
+						continue
+					}
+					var qr models.QuestionRequest
+					if err := json.Unmarshal(propsJSON, &qr); err != nil {
+						log.Printf("SSE: Failed to parse question request: %v", err)
+						continue
+					}
+
+					formData := struct {
+						RequestID string
+						Questions []models.QuestionInfo
+					}{
+						RequestID: requestID,
+						Questions: qr.Questions,
+					}
+
+					html, err := s.renderHTMLToString("question", formData)
+					if err != nil {
+						log.Printf("SSE: Failed to render question template: %v", err)
+						continue
+					}
+
+					html = strings.TrimSpace(html)
+					fmt.Fprintf(w, "event: message\n")
+					for _, l := range strings.Split(html, "\n") {
+						fmt.Fprintf(w, "data: %s\n", l)
+					}
+					fmt.Fprintf(w, "\n")
+					flusher.Flush()
+
+					log.Printf("WIRE_OUT SSE question [requestID=%s]: rendered %d bytes", requestID, len(html))
+				}
+			}
 		}
 	}
 

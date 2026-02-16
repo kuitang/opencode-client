@@ -207,11 +207,17 @@ func (ld *LocalDockerSandbox) ContainerIP() string {
 	if ld.containerName == "" || !ld.IsRunning() {
 		return ""
 	}
-	cmd := exec.Command("docker", "inspect", "--format", "{{.NetworkSettings.IPAddress}}", ld.containerName)
+	// Try the network-specific path first (works on all Docker versions),
+	// then fall back to the top-level field for older Docker versions.
+	cmd := exec.Command("docker", "inspect", "--format", `{{(index .NetworkSettings.Networks "bridge").IPAddress}}`, ld.containerName)
 	output, err := cmd.Output()
-	if err != nil {
-		log.Printf("Failed to get container IP: %v", err)
-		return ""
+	if err != nil || strings.TrimSpace(string(output)) == "" {
+		cmd = exec.Command("docker", "inspect", "--format", "{{.NetworkSettings.IPAddress}}", ld.containerName)
+		output, err = cmd.Output()
+		if err != nil {
+			log.Printf("Failed to get container IP: %v", err)
+			return ""
+		}
 	}
 	return strings.TrimSpace(string(output))
 }

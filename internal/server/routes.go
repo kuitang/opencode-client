@@ -24,6 +24,10 @@ func (s *Server) RegisterRoutes() *http.ServeMux {
 	mux.HandleFunc("POST /clear", s.handleClear)
 	mux.HandleFunc("GET /download", s.handleDownload)
 
+	// Question tool
+	mux.HandleFunc("POST /question/{requestID}/reply", s.handleQuestionReply)
+	mux.HandleFunc("POST /question/{requestID}/reject", s.handleQuestionReject)
+
 	// Tabs
 	mux.HandleFunc("GET /tab/preview", s.handleTabPreview)
 	mux.HandleFunc("GET /tab/code", s.handleTabCode)

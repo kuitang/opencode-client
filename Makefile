@@ -32,7 +32,7 @@ test-unit:
 
 ## test-integration: Run consolidated integration tests (requires Docker + auth.json)
 test-integration:
-	go test -v -run '^TestIntegration' ./internal/...
+	go test -v -timeout 300s -run '^TestIntegration' ./internal/...
 
 ## test-e2e: Build app, start it, run E2E tests, then stop it
 test-e2e:

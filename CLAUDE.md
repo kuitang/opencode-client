@@ -51,8 +51,10 @@ Routes defined in `routes.go`: `GET /{$}`, login/logout, `POST /send`, `GET /eve
 
 ## Tests
 
-- `internal/server/unit_test.go` — rendering, server helpers, concurrency
-- `internal/server/prop_test.go` — property-based (pgregory.net/rapid)
+**IMPORTANT: Always write property-based tests using `pgregory.net/rapid`. Do NOT write traditional table-driven or single-example unit tests.** Every new test must use `rapid.Check` with generators. Property tests are strictly preferred because they explore the input space more thoroughly and catch edge cases that hand-picked examples miss. See `prop_test.go` for generator patterns (`genPlainText`, `genXSSPayload`, `genQuestionInfo`, etc.).
+
+- `internal/server/prop_test.go` — **primary test file**: property-based tests (pgregory.net/rapid)
+- `internal/server/unit_test.go` — legacy traditional tests (do not add new tests here; migrate to prop_test.go when touching)
 - `internal/server/integration_test.go` — mocked HTTP/SSE + real sandbox + race/signal
 - `e2e/` — Playwright-go browser tests (headless Chromium)
 

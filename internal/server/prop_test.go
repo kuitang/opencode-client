@@ -1,16 +1,23 @@
 package server
 
 import (
+	"bytes"
+	"context"
 	"encoding/json"
 	"fmt"
 	"html/template"
+	"io"
+	"log"
 	"net/http"
 	"net/http/httptest"
+	"net/url"
+	"os"
 	"strings"
 	"sync/atomic"
 	"testing"
 	"time"
 
+	"github.com/PuerkitoBio/goquery"
 	"pgregory.net/rapid"
 
 	"opencode-chat/internal/auth"
@@ -886,6 +893,840 @@ func TestPropWaitForOpencodeReady(t *testing.T) {
 		finalCount := atomic.LoadInt32(&requestCount)
 		if int(finalCount) < failCount+1 {
 			t.Fatalf("expected at least %d requests, got %d", failCount+1, finalCount)
+		}
+	})
+}
+
+// ===================== Question Tool Generators =====================
+
+// genQuestionOption generates a random QuestionOption.
+func genQuestionOption() *rapid.Generator[models.QuestionOption] {
+	return rapid.Custom(func(t *rapid.T) models.QuestionOption {
+		return models.QuestionOption{
+			Label:       genAlphanumText().Draw(t, "optLabel"),
+			Description: genPlainText().Draw(t, "optDesc"),
+		}
+	})
+}
+
+// genQuestionInfo generates a random QuestionInfo with 2-4 options.
+func genQuestionInfo() *rapid.Generator[models.QuestionInfo] {
+	return rapid.Custom(func(t *rapid.T) models.QuestionInfo {
+		numOpts := rapid.IntRange(2, 4).Draw(t, "numOpts")
+		opts := make([]models.QuestionOption, numOpts)
+		for i := 0; i < numOpts; i++ {
+			opts[i] = genQuestionOption().Draw(t, fmt.Sprintf("opt%d", i))
+		}
+		return models.QuestionInfo{
+			Header:   genAlphanumText().Draw(t, "header"),
+			Question: genPlainText().Draw(t, "question"),
+			Options:  opts,
+			Multiple: rapid.Bool().Draw(t, "multiple"),
+		}
+	})
+}
+
+// genQuestionRequest generates a random QuestionRequest with 1-4 questions.
+func genQuestionRequest() *rapid.Generator[struct {
+	RequestID string
+	Questions []models.QuestionInfo
+}] {
+	return rapid.Custom(func(t *rapid.T) struct {
+		RequestID string
+		Questions []models.QuestionInfo
+	} {
+		numQ := rapid.IntRange(1, 4).Draw(t, "numQuestions")
+		questions := make([]models.QuestionInfo, numQ)
+		for i := 0; i < numQ; i++ {
+			questions[i] = genQuestionInfo().Draw(t, fmt.Sprintf("q%d", i))
+		}
+		return struct {
+			RequestID string
+			Questions []models.QuestionInfo
+		}{
+			RequestID: fmt.Sprintf("question_%d", rapid.IntRange(1, 999999).Draw(t, "reqID")),
+			Questions: questions,
+		}
+	})
+}
+
+// mockSandbox implements sandbox.Sandbox for unit tests.
+type mockSandbox struct {
+	baseURL string
+}
+
+func (m *mockSandbox) Start(apiKeys map[string]models.AuthConfig) error { return nil }
+func (m *mockSandbox) OpencodeURL() string                              { return m.baseURL }
+func (m *mockSandbox) GottyURL() string                                 { return "" }
+func (m *mockSandbox) DownloadZip() (io.ReadCloser, error)              { return nil, nil }
+func (m *mockSandbox) Stop() error                                      { return nil }
+func (m *mockSandbox) IsRunning() bool                                  { return true }
+func (m *mockSandbox) ContainerIP() string                              { return "" }
+
+// ===================== Question Tool Property Tests =====================
+
+// TestPropQuestionTemplateStructure verifies that for any valid question request,
+// the rendered template always contains: data-question-id, all option labels,
+// correct input types (radio vs checkbox), reply/reject URLs, and hidden count.
+func TestPropQuestionTemplateStructure(t *testing.T) {
+	tmpl, err := views.LoadTemplates()
+	if err != nil {
+		t.Fatalf("LoadTemplates: %v", err)
+	}
+	rapid.Check(t, func(t *rapid.T) {
+		formData := genQuestionRequest().Draw(t, "formData")
+
+		var buf bytes.Buffer
+		err := tmpl.ExecuteTemplate(&buf, "question", formData)
+		if err != nil {
+			t.Fatalf("ExecuteTemplate failed: %v", err)
+		}
+		html := buf.String()
+
+		// Property 1: data-question-id matches the request ID
+		if !strings.Contains(html, fmt.Sprintf(`data-question-id="%s"`, formData.RequestID)) {
+			t.Fatalf("missing data-question-id for %q", formData.RequestID)
+		}
+
+		// Property 2: reply and reject URLs contain the request ID
+		if !strings.Contains(html, "/question/"+formData.RequestID+"/reply") {
+			t.Fatalf("missing reply URL for %q", formData.RequestID)
+		}
+		if !strings.Contains(html, "/question/"+formData.RequestID+"/reject") {
+			t.Fatalf("missing reject URL for %q", formData.RequestID)
+		}
+
+		// Property 3: every option label appears as a value attribute
+		for _, q := range formData.Questions {
+			for _, opt := range q.Options {
+				escaped := template.HTMLEscapeString(opt.Label)
+				if !strings.Contains(html, escaped) {
+					t.Fatalf("option label %q not found in rendered HTML", opt.Label)
+				}
+			}
+		}
+
+		// Property 4: multi-select questions use checkboxes, single-select use radio
+		for _, q := range formData.Questions {
+			if q.Multiple {
+				if !strings.Contains(html, `type="checkbox"`) {
+					t.Fatalf("multi-select question should have checkboxes")
+				}
+			} else {
+				if !strings.Contains(html, `type="radio"`) {
+					t.Fatalf("single-select question should have radio buttons")
+				}
+			}
+		}
+
+		// Property 5: hidden question_count field matches
+		expectedCount := fmt.Sprintf(`value="%d"`, len(formData.Questions))
+		if !strings.Contains(html, expectedCount) {
+			t.Fatalf("question_count hidden field should have value %d", len(formData.Questions))
+		}
+
+		// Property 6: "Other" custom option always present
+		if !strings.Contains(html, "Other") {
+			t.Fatalf("missing 'Other' custom answer option")
+		}
+	})
+}
+
+// TestPropQuestionReplyRoundTrip verifies that for any set of selected options,
+// the handler correctly proxies them to OpenCode in the right format and the
+// response HTML contains all selected labels.
+func TestPropQuestionReplyRoundTrip(t *testing.T) {
+	tmpl, err := views.LoadTemplates()
+	if err != nil {
+		t.Fatalf("LoadTemplates: %v", err)
+	}
+	rapid.Check(t, func(t *rapid.T) {
+		formData := genQuestionRequest().Draw(t, "formData")
+
+		// For each question, randomly select 1+ options
+		var formValues url.Values = make(url.Values)
+		formValues.Set("question_count", fmt.Sprintf("%d", len(formData.Questions)))
+
+		var expectedAnswers [][]string
+		for qi, q := range formData.Questions {
+			key := fmt.Sprintf("q%d", qi)
+			var selected []string
+
+			if q.Multiple {
+				// Select a random subset of options (at least 1)
+				for oi, opt := range q.Options {
+					include := rapid.Bool().Draw(t, fmt.Sprintf("incl%d_%d", qi, oi))
+					if include {
+						formValues.Add(key, opt.Label)
+						selected = append(selected, opt.Label)
+					}
+				}
+				// Ensure at least one is selected
+				if len(selected) == 0 {
+					formValues.Add(key, q.Options[0].Label)
+					selected = append(selected, q.Options[0].Label)
+				}
+			} else {
+				// Select exactly 1 option
+				idx := rapid.IntRange(0, len(q.Options)-1).Draw(t, fmt.Sprintf("selIdx%d", qi))
+				formValues.Set(key, q.Options[idx].Label)
+				selected = []string{q.Options[idx].Label}
+			}
+			expectedAnswers = append(expectedAnswers, selected)
+		}
+
+		// Capture the JSON payload sent to OpenCode
+		var receivedPayload map[string]any
+		mockServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			json.NewDecoder(r.Body).Decode(&receivedPayload)
+			w.WriteHeader(http.StatusOK)
+		}))
+		defer mockServer.Close()
+
+		s := &Server{
+			Sandbox:   &mockSandbox{baseURL: mockServer.URL},
+			templates: tmpl,
+		}
+
+		body := strings.NewReader(formValues.Encode())
+		req := httptest.NewRequest("POST", "/question/"+formData.RequestID+"/reply", body)
+		req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+		req.SetPathValue("requestID", formData.RequestID)
+
+		rr := httptest.NewRecorder()
+		s.handleQuestionReply(rr, req)
+
+		if rr.Code != http.StatusOK {
+			t.Fatalf("expected 200, got %d", rr.Code)
+		}
+
+		// Property 1: response HTML contains all selected labels
+		responseHTML := rr.Body.String()
+		for _, answers := range expectedAnswers {
+			for _, label := range answers {
+				if !strings.Contains(responseHTML, template.HTMLEscapeString(label)) {
+					t.Fatalf("response should contain selected label %q", label)
+				}
+			}
+		}
+
+		// Property 2: payload sent to OpenCode has correct structure
+		rawAnswers, ok := receivedPayload["answers"].([]any)
+		if !ok {
+			t.Fatalf("payload missing 'answers' array")
+		}
+		if len(rawAnswers) != len(expectedAnswers) {
+			t.Fatalf("expected %d question answers, got %d", len(expectedAnswers), len(rawAnswers))
+		}
+	})
+}
+
+// TestPropQuestionReplyCustomText verifies that __custom__ sentinel is always
+// replaced with custom text and never appears in the proxied payload.
+func TestPropQuestionReplyCustomText(t *testing.T) {
+	tmpl, _ := views.LoadTemplates()
+	rapid.Check(t, func(t *rapid.T) {
+		customText := genPlainText().Draw(t, "customText")
+
+		var receivedPayload map[string]any
+		mockServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			json.NewDecoder(r.Body).Decode(&receivedPayload)
+			w.WriteHeader(http.StatusOK)
+		}))
+		defer mockServer.Close()
+
+		s := &Server{
+			Sandbox:   &mockSandbox{baseURL: mockServer.URL},
+			templates: tmpl,
+		}
+
+		formValues := url.Values{
+			"question_count": {"1"},
+			"q0":             {"__custom__"},
+			"q0_custom":      {customText},
+		}
+
+		body := strings.NewReader(formValues.Encode())
+		req := httptest.NewRequest("POST", "/question/q_test/reply", body)
+		req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+		req.SetPathValue("requestID", "q_test")
+
+		rr := httptest.NewRecorder()
+		s.handleQuestionReply(rr, req)
+
+		if rr.Code != http.StatusOK {
+			t.Fatalf("expected 200, got %d", rr.Code)
+		}
+
+		// Property: __custom__ sentinel never appears in proxied payload
+		payloadJSON, _ := json.Marshal(receivedPayload)
+		if strings.Contains(string(payloadJSON), "__custom__") {
+			t.Fatalf("__custom__ sentinel leaked into payload: %s", payloadJSON)
+		}
+
+		// Property: custom text appears in payload (trimmed)
+		trimmed := strings.TrimSpace(customText)
+		if trimmed != "" && !strings.Contains(string(payloadJSON), trimmed) {
+			t.Fatalf("custom text %q not found in payload: %s", trimmed, payloadJSON)
+		}
+	})
+}
+
+// TestPropQuestionRejectAlwaysProxies verifies that reject always calls OpenCode
+// and returns the dismissed template for any request ID.
+func TestPropQuestionRejectAlwaysProxies(t *testing.T) {
+	tmpl, _ := views.LoadTemplates()
+	rapid.Check(t, func(t *rapid.T) {
+		requestID := fmt.Sprintf("question_%d", rapid.IntRange(1, 999999).Draw(t, "reqID"))
+		var calledPath string
+
+		mockServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			calledPath = r.URL.Path
+			w.WriteHeader(http.StatusOK)
+		}))
+		defer mockServer.Close()
+
+		s := &Server{
+			Sandbox:   &mockSandbox{baseURL: mockServer.URL},
+			templates: tmpl,
+		}
+
+		req := httptest.NewRequest("POST", "/question/"+requestID+"/reject", nil)
+		req.SetPathValue("requestID", requestID)
+
+		rr := httptest.NewRecorder()
+		s.handleQuestionReject(rr, req)
+
+		// Property 1: always returns 200
+		if rr.Code != http.StatusOK {
+			t.Fatalf("expected 200, got %d", rr.Code)
+		}
+
+		// Property 2: proxied path includes the request ID
+		if !strings.Contains(calledPath, requestID) {
+			t.Fatalf("proxy path %q should contain request ID %q", calledPath, requestID)
+		}
+
+		// Property 3: response contains "dismissed"
+		if !strings.Contains(rr.Body.String(), "dismissed") {
+			t.Fatalf("response should contain 'dismissed'")
+		}
+	})
+}
+
+// ===================== Transform & Rendering Property Tests =====================
+
+// TestPropTransformMessagePartTypes verifies that TransformMessagePart preserves
+// type and partID, and produces type-specific content for any valid part.
+func TestPropTransformMessagePartTypes(t *testing.T) {
+	tmpl, err := views.LoadTemplates()
+	if err != nil {
+		t.Fatalf("LoadTemplates: %v", err)
+	}
+	rapid.Check(t, func(t *rapid.T) {
+		partType := rapid.SampledFrom([]string{"text", "tool", "reasoning", "step-start", "step-finish"}).Draw(t, "partType")
+		partID := genPartID().Draw(t, "partID")
+		content := genPlainText().Draw(t, "content")
+
+		part := models.MessagePart{
+			ID:   partID,
+			Type: partType,
+		}
+
+		switch partType {
+		case "text":
+			part.Text = content
+		case "reasoning":
+			part.Text = content
+		case "tool":
+			toolName := rapid.SampledFrom([]string{"bash", "read", "edit", "write", "glob", "grep", "webfetch", "todowrite"}).Draw(t, "toolName")
+			status := rapid.SampledFrom([]string{"running", "completed", "error"}).Draw(t, "toolStatus")
+			part.Tool = toolName
+			part.State = map[string]any{
+				"status": status,
+				"input":  map[string]any{"command": content},
+				"output": content,
+			}
+		}
+
+		result := views.TransformMessagePart(tmpl, part)
+
+		// Property 1: type is preserved
+		if result.Type != partType {
+			t.Fatalf("expected type %q, got %q", partType, result.Type)
+		}
+
+		// Property 2: partID is preserved
+		if result.PartID != partID {
+			t.Fatalf("expected partID %q, got %q", partID, result.PartID)
+		}
+
+		// Property 3: type-specific content properties
+		switch partType {
+		case "text":
+			if result.Content != part.Text {
+				t.Fatalf("text content not preserved: expected %q, got %q", part.Text, result.Content)
+			}
+			if strings.TrimSpace(part.Text) != "" && string(result.RenderedHTML) == "" {
+				t.Fatalf("non-empty text should produce non-empty RenderedHTML")
+			}
+		case "reasoning":
+			if !strings.Contains(result.Content, "🤔") {
+				t.Fatalf("reasoning should contain thinking emoji")
+			}
+			if !strings.Contains(result.Content, part.Text) {
+				t.Fatalf("reasoning should contain original text")
+			}
+		case "tool":
+			if !strings.Contains(result.Content, part.Tool) {
+				t.Fatalf("tool content should contain tool name %q, got %q", part.Tool, result.Content)
+			}
+		case "step-start":
+			if !strings.Contains(result.Content, "▶️") {
+				t.Fatalf("step-start should contain play emoji")
+			}
+			if !strings.Contains(string(result.RenderedHTML), "bg-yellow-100") {
+				t.Fatalf("step-start should have yellow badge styling")
+			}
+		case "step-finish":
+			if !strings.Contains(result.Content, "✅") {
+				t.Fatalf("step-finish should contain check emoji")
+			}
+			if !strings.Contains(string(result.RenderedHTML), "bg-green-100") {
+				t.Fatalf("step-finish should have green badge styling")
+			}
+		}
+	})
+}
+
+// TestPropMultilineRendering verifies that for any set of lines joined by
+// any separator (\n or \r\n), all lines survive in the rendered message HTML.
+func TestPropMultilineRendering(t *testing.T) {
+	tmpl, err := views.LoadTemplates()
+	if err != nil {
+		t.Fatalf("LoadTemplates: %v", err)
+	}
+	rapid.Check(t, func(t *rapid.T) {
+		numLines := rapid.IntRange(2, 10).Draw(t, "numLines")
+		lines := make([]string, numLines)
+		for i := 0; i < numLines; i++ {
+			lines[i] = genAlphanumText().Draw(t, fmt.Sprintf("line%d", i))
+		}
+		sep := rapid.SampledFrom([]string{"\n", "\r\n"}).Draw(t, "separator")
+		input := strings.Join(lines, sep)
+
+		msgData := views.MessageData{
+			Alignment: "left",
+			Parts: []views.MessagePartData{{
+				Type:         "text",
+				Content:      input,
+				RenderedHTML: views.RenderText(input),
+			}},
+		}
+		html, err := views.RenderMessage(tmpl, msgData)
+		if err != nil {
+			t.Fatalf("RenderMessage failed: %v", err)
+		}
+
+		for i, line := range lines {
+			if !strings.Contains(html, line) {
+				t.Fatalf("line %d %q not found in rendered HTML", i, line)
+			}
+		}
+	})
+}
+
+// ===================== Template & UI Property Tests =====================
+
+// TestPropTemplateCountConsistency verifies that sub-template rendering
+// matches composite template rendering for any file/line count values.
+func TestPropTemplateCountConsistency(t *testing.T) {
+	tmpl, err := views.LoadTemplates()
+	if err != nil {
+		t.Fatalf("LoadTemplates: %v", err)
+	}
+	rapid.Check(t, func(t *rapid.T) {
+		fileCount := rapid.IntRange(0, 10000).Draw(t, "fileCount")
+		lineCount := rapid.IntRange(0, 100000).Draw(t, "lineCount")
+		numFiles := rapid.IntRange(0, 10).Draw(t, "numFiles")
+
+		files := make([]models.FileNode, numFiles)
+		for i := 0; i < numFiles; i++ {
+			name := fmt.Sprintf("file%d.go", i)
+			files[i] = models.FileNode{Path: name, Name: name}
+		}
+
+		var currentPath string
+		if numFiles > 0 {
+			currentPath = files[0].Path
+		}
+
+		data := struct {
+			FileCount, LineCount int
+			Files                []models.FileNode
+			CurrentPath          string
+		}{FileCount: fileCount, LineCount: lineCount, Files: files, CurrentPath: currentPath}
+
+		// Render file-count-content directly
+		var directBuf bytes.Buffer
+		if err := tmpl.ExecuteTemplate(&directBuf, "file-count-content", data); err != nil {
+			t.Fatalf("Failed to render file-count-content: %v", err)
+		}
+		directHTML := strings.TrimSpace(directBuf.String())
+
+		// Render via composite template and extract
+		var compositeBuf bytes.Buffer
+		if err := tmpl.ExecuteTemplate(&compositeBuf, "file-options-with-counts", data); err != nil {
+			t.Fatalf("Failed to render file-options-with-counts: %v", err)
+		}
+		compositeHTML := compositeBuf.String()
+
+		// Property: sub-template output must appear in composite output
+		startMarker := `<div id="file-count-container" hx-swap-oob="innerHTML">`
+		startIdx := strings.Index(compositeHTML, startMarker)
+		if startIdx == -1 {
+			t.Fatalf("file-count-container not found in composite output")
+		}
+		startIdx += len(startMarker)
+		endIdx := strings.Index(compositeHTML[startIdx:], `</div>`)
+		if endIdx == -1 {
+			t.Fatalf("closing div not found")
+		}
+		extracted := strings.TrimSpace(compositeHTML[startIdx : startIdx+endIdx])
+
+		if directHTML != extracted {
+			t.Fatalf("file count mismatch:\ndirect: %q\nextracted: %q", directHTML, extracted)
+		}
+
+		// Property: file count value appears in output
+		expectedCount := fmt.Sprintf("%d", fileCount)
+		if !strings.Contains(directHTML, expectedCount) {
+			t.Fatalf("file count %d not found in output", fileCount)
+		}
+	})
+}
+
+// TestPropTemplateHTMLStructure verifies structural invariants of count templates
+// hold for any file/line count values.
+func TestPropTemplateHTMLStructure(t *testing.T) {
+	tmpl, err := views.LoadTemplates()
+	if err != nil {
+		t.Fatalf("LoadTemplates: %v", err)
+	}
+	rapid.Check(t, func(t *rapid.T) {
+		fileCount := rapid.IntRange(0, 99999).Draw(t, "fileCount")
+		lineCount := rapid.IntRange(0, 999999).Draw(t, "lineCount")
+
+		data := struct{ FileCount, LineCount int }{fileCount, lineCount}
+
+		// Property: file-count-content has correct styling and value
+		var fcBuf bytes.Buffer
+		if err := tmpl.ExecuteTemplate(&fcBuf, "file-count-content", data); err != nil {
+			t.Fatalf("file-count-content: %v", err)
+		}
+		fcHTML := fcBuf.String()
+		fcDoc, err := goquery.NewDocumentFromReader(strings.NewReader(fcHTML))
+		if err != nil {
+			t.Fatalf("parse file-count HTML: %v", err)
+		}
+		if fcDoc.Find(`.text-2xl`).Length() == 0 {
+			t.Fatalf("file count missing text-2xl styling")
+		}
+		if fcDoc.Find(`.text-sm`).Length() == 0 {
+			t.Fatalf("file count missing text-sm styling")
+		}
+		if !strings.Contains(fcHTML, fmt.Sprintf("%d", fileCount)) {
+			t.Fatalf("file count %d not in output", fileCount)
+		}
+
+		// Property: line-count-content has same structure and correct value
+		var lcBuf bytes.Buffer
+		if err := tmpl.ExecuteTemplate(&lcBuf, "line-count-content", data); err != nil {
+			t.Fatalf("line-count-content: %v", err)
+		}
+		lcHTML := lcBuf.String()
+		if !strings.Contains(lcHTML, fmt.Sprintf("%d", lineCount)) {
+			t.Fatalf("line count %d not in output", lineCount)
+		}
+		if !strings.Contains(lcHTML, "Lines of Code") {
+			t.Fatalf("missing 'Lines of Code' label")
+		}
+	})
+}
+
+// TestPropMessageTemplateAttributes verifies that message IDs, alignment classes,
+// streaming flags, and OOB swap attributes are correctly rendered for any combination.
+func TestPropMessageTemplateAttributes(t *testing.T) {
+	tmpl, err := views.LoadTemplates()
+	if err != nil {
+		t.Fatalf("LoadTemplates: %v", err)
+	}
+	rapid.Check(t, func(t *rapid.T) {
+		id := genMessageID().Draw(t, "msgID")
+		alignment := rapid.SampledFrom([]string{"left", "right"}).Draw(t, "alignment")
+		isStreaming := rapid.Bool().Draw(t, "streaming")
+		hxSwapOOB := rapid.Bool().Draw(t, "oob")
+		text := genPlainText().Draw(t, "text")
+
+		data := views.MessageData{
+			ID:         id,
+			Alignment:  alignment,
+			Text:       text,
+			IsStreaming: isStreaming,
+			HXSwapOOB:  hxSwapOOB,
+		}
+
+		html, err := views.RenderMessage(tmpl, data)
+		if err != nil {
+			t.Fatalf("RenderMessage: %v", err)
+		}
+		doc, err := goquery.NewDocumentFromReader(strings.NewReader(html))
+		if err != nil {
+			t.Fatalf("parse: %v", err)
+		}
+
+		msg := doc.Find("div.flex").First()
+
+		// Property: ID is always present
+		gotID, exists := msg.Attr("id")
+		if !exists {
+			t.Fatalf("expected id attribute")
+		}
+		if gotID != id {
+			t.Fatalf("expected id %q, got %q", id, gotID)
+		}
+
+		// Property: alignment maps to justify class
+		class, _ := msg.Attr("class")
+		if alignment == "right" && !strings.Contains(class, "justify-end") {
+			t.Fatalf("right alignment should have justify-end")
+		}
+		if alignment == "left" && !strings.Contains(class, "justify-start") {
+			t.Fatalf("left alignment should have justify-start")
+		}
+
+		// Property: streaming flag maps to streaming class
+		if isStreaming && !strings.Contains(class, "streaming") {
+			t.Fatalf("streaming=true should add streaming class")
+		}
+		if !isStreaming && strings.Contains(class, "streaming") {
+			t.Fatalf("streaming=false should not have streaming class")
+		}
+
+		// Property: OOB flag maps to hx-swap-oob attribute
+		if hxSwapOOB {
+			oob, hasOOB := msg.Attr("hx-swap-oob")
+			if !hasOOB || oob != "true" {
+				t.Fatalf("expected hx-swap-oob=true when HXSwapOOB=true")
+			}
+		}
+	})
+}
+
+// TestPropMessageMetadata verifies that provider/model metadata appears
+// if and only if both fields are set.
+func TestPropMessageMetadata(t *testing.T) {
+	tmpl, err := views.LoadTemplates()
+	if err != nil {
+		t.Fatalf("LoadTemplates: %v", err)
+	}
+	rapid.Check(t, func(t *rapid.T) {
+		provider := rapid.SampledFrom([]string{"", "openai", "opencode", "anthropic"}).Draw(t, "provider")
+		model := rapid.SampledFrom([]string{"", "gpt-4o", "minimax-m2.5-free", "claude-3"}).Draw(t, "model")
+		alignment := rapid.SampledFrom([]string{"left", "right"}).Draw(t, "alignment")
+
+		data := views.MessageData{
+			Alignment: alignment,
+			Text:      "test",
+			Provider:  provider,
+			Model:     model,
+		}
+
+		html, err := views.RenderMessage(tmpl, data)
+		if err != nil {
+			t.Fatalf("RenderMessage: %v", err)
+		}
+		doc, err := goquery.NewDocumentFromReader(strings.NewReader(html))
+		if err != nil {
+			t.Fatalf("parse: %v", err)
+		}
+
+		meta := doc.Find("div.text-xs.text-gray-600")
+		shouldHaveMeta := provider != "" && model != ""
+
+		if shouldHaveMeta {
+			if meta.Length() == 0 {
+				t.Fatalf("expected metadata for provider=%q model=%q", provider, model)
+			}
+			expectedText := provider + "/" + model
+			if !strings.Contains(meta.Text(), expectedText) {
+				t.Fatalf("expected metadata %q, got %q", expectedText, meta.Text())
+			}
+		} else {
+			if meta.Length() > 0 {
+				t.Fatalf("unexpected metadata for provider=%q model=%q", provider, model)
+			}
+		}
+	})
+}
+
+// ===================== Rate Limiter & Logging Property Tests =====================
+
+// TestPropRateLimiterCoalescence verifies that for any number of rapid updates,
+// the first executes immediately and subsequent ones coalesce into a single execution.
+func TestPropRateLimiterCoalescence(t *testing.T) {
+	rapid.Check(t, func(t *rapid.T) {
+		numUpdates := rapid.IntRange(2, 20).Draw(t, "numUpdates")
+
+		var counter int32
+		var lastValue int32
+		limiter := NewUpdateRateLimiter(500 * time.Millisecond)
+
+		// First update should be immediate
+		limiter.TryUpdate(context.Background(), func() {
+			atomic.AddInt32(&counter, 1)
+			atomic.StoreInt32(&lastValue, 1)
+		})
+		time.Sleep(100 * time.Millisecond)
+
+		if atomic.LoadInt32(&counter) != 1 {
+			t.Fatalf("first update should be immediate, got %d executions", atomic.LoadInt32(&counter))
+		}
+
+		// Rapid subsequent updates should coalesce
+		for i := 2; i <= numUpdates; i++ {
+			val := int32(i)
+			limiter.TryUpdate(context.Background(), func() {
+				atomic.AddInt32(&counter, 1)
+				atomic.StoreInt32(&lastValue, val)
+			})
+		}
+
+		// Wait for coalesced update to fire
+		time.Sleep(600 * time.Millisecond)
+
+		finalCount := atomic.LoadInt32(&counter)
+		if finalCount != 2 {
+			t.Fatalf("expected 2 executions (1 immediate + 1 coalesced), got %d", finalCount)
+		}
+
+		finalValue := atomic.LoadInt32(&lastValue)
+		if finalValue != int32(numUpdates) {
+			t.Fatalf("coalesced update should use latest value %d, got %d", numUpdates, finalValue)
+		}
+	})
+}
+
+// TestPropLoggingResponseWriter verifies that for any status code and body,
+// LoggingResponseWriter captures both correctly and logs them without truncation.
+func TestPropLoggingResponseWriter(t *testing.T) {
+	rapid.Check(t, func(t *rapid.T) {
+		statusCode := rapid.IntRange(100, 599).Draw(t, "statusCode")
+		body := genPlainText().Draw(t, "body")
+		method := rapid.SampledFrom([]string{"GET", "POST", "PUT", "DELETE"}).Draw(t, "method")
+		path := "/" + genAlphanumText().Draw(t, "path")
+
+		var logOutput bytes.Buffer
+		log.SetOutput(&logOutput)
+		defer log.SetOutput(os.Stderr)
+
+		recorder := httptest.NewRecorder()
+		lw := middleware.NewLoggingResponseWriter(recorder)
+
+		// Property: default status is 200 and body buffer is initialized
+		if lw.StatusCode != 200 {
+			t.Fatalf("default status should be 200, got %d", lw.StatusCode)
+		}
+		if lw.Body == nil || lw.Body.Len() != 0 {
+			t.Fatalf("body buffer should be initialized and empty")
+		}
+
+		lw.WriteHeader(statusCode)
+		n, err := lw.Write([]byte(body))
+
+		// Property: write succeeds without error
+		if err != nil {
+			t.Fatalf("Write error: %v", err)
+		}
+		// Property: all bytes are written
+		if n != len(body) {
+			t.Fatalf("wrote %d bytes, expected %d", n, len(body))
+		}
+		// Property: status code is captured
+		if lw.StatusCode != statusCode {
+			t.Fatalf("expected status %d, got %d", statusCode, lw.StatusCode)
+		}
+		// Property: body is captured in both places
+		if lw.Body.String() != body {
+			t.Fatalf("lw.Body mismatch")
+		}
+		if recorder.Body.String() != body {
+			t.Fatalf("recorder.Body mismatch")
+		}
+
+		// Property: LogResponse includes status and body in log (no truncation)
+		lw.LogResponse(method, path)
+		logStr := logOutput.String()
+		expectedPrefix := fmt.Sprintf("WIRE_OUT %s %s [%d]", method, path, statusCode)
+		if !strings.Contains(logStr, expectedPrefix) {
+			t.Fatalf("log should contain %q, got %q", expectedPrefix, logStr)
+		}
+		if !strings.Contains(logStr, body) {
+			t.Fatalf("log should contain response body without truncation")
+		}
+	})
+}
+
+// TestPropLoggingMiddleware verifies that the /events path gets SSE-specific
+// connection start/end logging, while all other paths get WIRE_OUT logging.
+func TestPropLoggingMiddleware(t *testing.T) {
+	rapid.Check(t, func(t *rapid.T) {
+		method := rapid.SampledFrom([]string{"GET", "POST", "PUT", "DELETE", "PATCH"}).Draw(t, "method")
+		body := genPlainText().Draw(t, "body")
+		statusCode := rapid.IntRange(200, 599).Draw(t, "status")
+		isSSE := rapid.Bool().Draw(t, "isSSE")
+
+		// SSE detection is path-based: r.URL.Path == "/events"
+		var path string
+		if isSSE {
+			path = "/events"
+		} else {
+			path = "/" + genAlphanumText().Draw(t, "path")
+		}
+
+		var logOutput bytes.Buffer
+		log.SetOutput(&logOutput)
+		defer log.SetOutput(os.Stderr)
+
+		handler := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			w.WriteHeader(statusCode)
+			w.Write([]byte(body))
+		})
+
+		req := httptest.NewRequest(method, path, nil)
+		recorder := httptest.NewRecorder()
+		middleware.LoggingMiddleware(handler).ServeHTTP(recorder, req)
+
+		logStr := logOutput.String()
+
+		if isSSE {
+			// Property: /events path gets SSE connection start/end logging
+			if !strings.Contains(logStr, "WIRE_OUT SSE connection started") {
+				t.Fatalf("SSE should log connection started, got: %s", logStr)
+			}
+			if !strings.Contains(logStr, "WIRE_OUT SSE connection ended") {
+				t.Fatalf("SSE should log connection ended, got: %s", logStr)
+			}
+			// Property: SSE endpoint should NOT use normal response logging
+			if strings.Contains(logStr, fmt.Sprintf("WIRE_OUT %s /events [", method)) {
+				t.Fatalf("SSE endpoint should not use normal response logging")
+			}
+		} else {
+			// Property: non-events paths get WIRE_OUT with method, path, status
+			expectedLog := fmt.Sprintf("WIRE_OUT %s %s [%d]", method, path, statusCode)
+			if !strings.Contains(logStr, expectedLog) {
+				t.Fatalf("expected log containing %q, got %q", expectedLog, logStr)
+			}
 		}
 	})
 }

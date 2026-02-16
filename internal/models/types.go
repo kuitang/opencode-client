@@ -88,6 +88,27 @@ type MacChromeData struct {
 	MainContent  template.HTML `json:"mainContent"`
 }
 
+// QuestionOption represents a single answer choice from OpenCode's question tool.
+type QuestionOption struct {
+	Label       string `json:"label"`
+	Description string `json:"description"`
+}
+
+// QuestionInfo represents a single question with its options.
+type QuestionInfo struct {
+	Question string           `json:"question"`
+	Header   string           `json:"header"`
+	Options  []QuestionOption `json:"options"`
+	Multiple bool             `json:"multiple,omitempty"`
+}
+
+// QuestionRequest represents a question.asked event from OpenCode.
+type QuestionRequest struct {
+	ID        string         `json:"id"`
+	SessionID string         `json:"sessionID"`
+	Questions []QuestionInfo `json:"questions"`
+}
+
 // AuthConfig represents the authentication configuration for different providers
 // Based on the structure found in ~/.local/share/opencode/auth.json
 type AuthConfig struct {
