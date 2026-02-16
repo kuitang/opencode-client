@@ -12,11 +12,11 @@
 </head>
 <body class="h-screen bg-gray-50">
     <!-- Unified Responsive Layout -->
-    <div class="flex h-full lg:static relative">
+    <div class="flex max-lg:flex-col h-full lg:static relative overflow-hidden">
         <!-- Single Chat Container - Responsive -->
-        <aside id="chat-container" class="chat-responsive bg-white border-r border-gray-200 lg:border-r lg:relative lg:flex lg:flex-col lg:w-1/3 
-                                          max-lg:fixed max-lg:inset-x-0 max-lg:bottom-0 max-lg:max-h-[80vh] max-lg:border-t max-lg:border-r-0 max-lg:rounded-t-lg max-lg:shadow-lg max-lg:z-50
-                                          transform transition-transform duration-300 ease-in-out chat-expanded">
+        <aside id="chat-container" class="chat-responsive bg-white border-r border-gray-200 lg:border-r lg:relative lg:flex lg:flex-col lg:w-1/3
+                                          max-lg:w-full max-lg:border-t max-lg:border-r-0
+                                          transition-all duration-300 ease-in-out chat-expanded">
             <!-- Chat Header -->
             <header class="bg-gray-800 text-white px-4 h-14 flex justify-between items-center">
                 <div class="flex items-center gap-3">

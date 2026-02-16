@@ -78,7 +78,7 @@ func (s *Server) getAllModels() []models.ModelOption {
 // executeShellCommand executes a shell command via OpenCode API and returns the output.
 func (s *Server) executeShellCommand(sessionID, command string) (string, error) {
 	shellURL := fmt.Sprintf("/session/%s/shell", sessionID)
-	payload := map[string]string{"agent": "agent", "command": command}
+	payload := map[string]string{"agent": "build", "command": command}
 
 	resp, err := s.opencodePost(shellURL, payload)
 	if err != nil {

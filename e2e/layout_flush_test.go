@@ -72,14 +72,13 @@ func TestLayoutFlush(t *testing.T) {
 		page := newPage(t)
 		layoutFlushBeforeEach(t, page)
 
-		viewports := []struct{ width, height int }{
-			{375, 667},
-			{768, 1024},
+		// Desktop viewports: chat header and tab nav should be flush (side by side)
+		desktopViewports := []struct{ width, height int }{
 			{1024, 768},
+			{1280, 720},
 		}
-
-		for _, vp := range viewports {
-			t.Run(fmt.Sprintf("%dx%d", vp.width, vp.height), func(t *testing.T) {
+		for _, vp := range desktopViewports {
+			t.Run(fmt.Sprintf("%dx%d_flush", vp.width, vp.height), func(t *testing.T) {
 				err := page.SetViewportSize(vp.width, vp.height)
 				require.NoError(t, err)
 
@@ -87,6 +86,26 @@ func TestLayoutFlush(t *testing.T) {
 				require.True(t, result["ok"].(bool),
 					"alignment should hold at %dx%d; difference=%v",
 					vp.width, vp.height, result["difference"])
+			})
+		}
+
+		// Mobile viewports: elements stacked vertically, both should be visible
+		mobileViewports := []struct{ width, height int }{
+			{375, 667},
+			{768, 1024},
+		}
+		for _, vp := range mobileViewports {
+			t.Run(fmt.Sprintf("%dx%d_stacked", vp.width, vp.height), func(t *testing.T) {
+				err := page.SetViewportSize(vp.width, vp.height)
+				require.NoError(t, err)
+
+				headerVisible, err := page.Locator("header").IsVisible()
+				require.NoError(t, err)
+				require.True(t, headerVisible, "chat header should be visible at %dx%d", vp.width, vp.height)
+
+				navVisible, err := page.Locator("[data-testid=\"tab-navigation\"]").IsVisible()
+				require.NoError(t, err)
+				require.True(t, navVisible, "tab nav should be visible at %dx%d", vp.width, vp.height)
 			})
 		}
 	})

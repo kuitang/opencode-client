@@ -26,55 +26,38 @@
 
 /* Mobile Chat States */
 @media (max-width: 1023px) {
-    /* Keep chat aligned with primary navigation in compact layouts */
-    .chat-responsive {
-        position: static !important;
-        top: auto !important;
-        bottom: auto !important;
-        left: auto !important;
-        right: auto !important;
-        max-height: none !important;
-        box-shadow: none !important;
-    }
-    
     .chat-minimized {
         height: 64px; /* Only header height */
-        overflow: hidden; /* Hide all content except header */
-    }
-    
-    .chat-minimized #messages,
-    .chat-minimized #message-form {
-        visibility: hidden; /* Hide but preserve layout space */
-        height: 0; /* Collapse height when hidden */
         overflow: hidden;
     }
-    
+
+    .chat-minimized #messages,
+    .chat-minimized #message-form {
+        visibility: hidden;
+        height: 0;
+        overflow: hidden;
+    }
+
     .chat-expanded {
-        height: auto;
-        overflow: visible; /* Show all content when expanded */
         display: flex;
         flex-direction: column;
     }
-    
+
     .chat-expanded #messages {
         visibility: visible;
         height: auto;
-        flex: 1; /* Take available space */
-        min-height: 0; /* Allow shrinking */
+        max-height: 40vh;
+        min-height: 0;
         overflow-y: auto;
     }
-    
+
     .chat-expanded #message-form {
         visibility: visible;
         height: auto;
-        position: sticky; /* Keep form always visible at bottom */
-        bottom: 0;
-        background: white;
-        border-top: 1px solid #e5e7eb;
-        flex-shrink: 0; /* Don't shrink the form */
+        flex-shrink: 0;
     }
-    
-    /* Rotate chevron icon when expanded (now points down when expanded) */
+
+    /* Rotate chevron icon when expanded */
     .chat-expanded #chat-toggle svg {
         transform: rotate(180deg);
     }
